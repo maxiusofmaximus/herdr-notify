@@ -211,6 +211,41 @@ def test_pairing_by_code_works_when_tailscale_is_unavailable(
     assert Phone("pixel").pair(harness.client, code=code).status_code == 200
 
 
+def test_a_code_minted_by_the_enroll_cli_pairs_with_a_running_gateway(tmp_path: Any) -> None:
+    """The gateway and ``herdr-notify enroll`` are different processes.
+
+    Regression: enrollment codes were kept only in the minting process's memory,
+    so a code the CLI printed was invisible to the running gateway and every
+    fresh code answered ``403 pairing_rejected`` (the app's "código no válido,
+    ya se usó o ha caducado"). The gateway's store and the CLI's store are
+    separate instances over one file, which is the real setup.
+    """
+    path = tmp_path / "devices.json"
+    gateway = DeviceStore(path)
+    context = AppContext(
+        store=Store(),
+        devices=gateway,
+        verifier=RequestVerifier(gateway),
+        limiter=RateLimiter(read_per_minute=1000, write_per_minute=1000),
+        streams=StreamRegistry(per_device=4),
+        client=None,  # type: ignore[arg-type]  # unused by these endpoints
+        subscribers=set(),
+    )
+    client = TestClient(
+        create_app(context, ApiConfig(device_store_path=path)), raise_server_exceptions=False
+    )
+
+    first = DeviceStore(path).issue_enrollment_code().code  # the enroll CLI
+    assert Phone("pixel").pair(client, code=first).status_code == 200
+
+    # A second, later CLI invocation still pairs: the gateway reloads the store.
+    second = DeviceStore(path).issue_enrollment_code().code
+    assert Phone("second").pair(client, code=second).status_code == 200
+
+    # And the spent code is refused, so single use survives the process split.
+    assert Phone("thief").pair(client, code=first).status_code == 403
+
+
 # -- (2) tailnet auto-approval ----------------------------------------------
 
 

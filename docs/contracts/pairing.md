@@ -80,7 +80,11 @@ host and enters once on the phone.
 - **Pairing code**: `DeviceStore.issue_enrollment_code` — 4 random bytes, base32,
   600 s TTL, **single use**. `herdr-notify enroll` prints it. The store validates
   the payload **before** spending the code, so a malformed request cannot deny
-  the legitimate phone its pairing.
+  the legitimate phone its pairing. The code is **persisted to the trust store**
+  (as a SHA-256 digest, never in the clear), because `enroll` and the running
+  `serve` gateway are separate processes: the gateway notices the changed file
+  (`reload_if_changed`) and accepts the code. A spent or expired code is dropped
+  from the file, so single use survives a restart.
 - **Recovery code**: minted at pairing and returned exactly once; stored only as
   a SHA-256 hash. `herdr-notify devices --recovery <id>` mints a new one
   (rotating the old). It re-keys the device without manual approval and cannot
@@ -103,7 +107,11 @@ is still the way to grant anything beyond the `READ_STATE` pairing default.
 ## Trust store — IMPLEMENTED
 
 - Path: `~/.config/herdr-notify/devices.json` (override with `--devices`).
-- Shape: `{ "version": 1, "devices": [ {device…} ] }`, keys sorted, pretty JSON.
+- Shape: `{ "version": 1, "devices": [ {device…} ], "codes": [ {code_hash…} ] }`,
+  keys sorted, pretty JSON. `codes` holds the SHA-256 digest and the validity
+  window of each **live** pairing code (`{code_hash, created_at, expires_at}`);
+  spent and expired codes are not written. The plaintext of a code never appears
+  in the file.
 - **Fail closed:** a file that cannot be read or parsed leaves the store empty
   and trusts nobody. A corrupt store is never treated as "no devices, so allow
   all".

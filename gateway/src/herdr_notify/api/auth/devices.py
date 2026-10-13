@@ -185,6 +185,20 @@ def _recovery_hash(code: str) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _enrollment_hash(code: str) -> str:
+    """Hash an enrollment code, both to store it and to look it up.
+
+    The plaintext is never written to the trust store: the store keeps only this
+    digest, so a leaked file does not hand out a live pairing code. The
+    canonical form drops separators and case, so a code retyped from the screen
+    still matches. A pairing code is only 32 bits, so this is defence in depth
+    rather than a barrier against someone who already reads the host's files —
+    such a code also expires in minutes and is single use.
+    """
+    canonical = "".join(code.split()).replace("-", "").upper()
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def normalise_permissions(permissions: list[str] | None) -> list[str]:
     """The granted set for a freshly enrolled device.
 
@@ -201,9 +215,11 @@ def normalise_permissions(permissions: list[str] | None) -> list[str]:
 class DeviceStore:
     """Registered devices, persisted as JSON.
 
-    The file holds public keys only. Even a full compromise of this file grants
-    nothing: an attacker learns which keys are trusted, not how to answer as any
-    of them.
+    The file holds public keys, plus the hashes of any live pairing codes (never
+    a code in the clear). Even a full compromise of this file grants nothing: an
+    attacker learns which keys are trusted, not how to answer as any of them.
+    Persisting the codes is what lets the ``enroll`` CLI and the running gateway
+    — separate processes sharing one store — agree on a code.
     """
 
     def __init__(self, path: Path | None = None, *, clock: Any = time.time) -> None:
@@ -242,8 +258,26 @@ class DeviceStore:
                     p for p in device.permissions if p in SUPPORTED_PERMISSIONS
                 ]
                 loaded[device.device_id] = device
+        # Enrollment codes live in the same file, hashed, so a code minted by
+        # the `enroll` CLI is visible to the running gateway: it is a different
+        # process, and without this the code would exist only in the CLI's
+        # memory and every fresh code would be refused. Spent and expired codes
+        # are dropped on load rather than resurrected.
+        now = float(self._clock())
+        loaded_codes: dict[str, EnrollmentCode] = {}
+        for entry in raw.get("codes") or []:
+            try:
+                code_hash = str(entry["code_hash"])
+                created_at = float(entry["created_at"])
+                expires_at = float(entry["expires_at"])
+            except (TypeError, KeyError, ValueError):
+                continue
+            code = EnrollmentCode(code=code_hash, created_at=created_at, expires_at=expires_at)
+            if code.valid_at(now):
+                loaded_codes[code_hash] = code
         with self._lock:
             self._devices = loaded
+            self._codes = loaded_codes
         self._stamp = self._current_stamp()
 
     def _current_stamp(self) -> float | None:
@@ -279,7 +313,24 @@ class DeviceStore:
             return
         assert self._path is not None
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"version": 1, "devices": [asdict(d) for d in self._devices.values()]}
+        # Only live codes are persisted: a spent or expired one is left off, so
+        # single use survives a restart and the file is self-healing. The code
+        # itself is never written — only its digest.
+        now = float(self._clock())
+        live_codes = [
+            {
+                "code_hash": code_hash,
+                "created_at": entry.created_at,
+                "expires_at": entry.expires_at,
+            }
+            for code_hash, entry in self._codes.items()
+            if entry.valid_at(now)
+        ]
+        payload = {
+            "version": 1,
+            "devices": [asdict(d) for d in self._devices.values()],
+            "codes": live_codes,
+        }
         tmp = self._path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         # Atomic replace: a half-written trust store is a gateway that either
@@ -337,13 +388,22 @@ class DeviceStore:
     # -- enrollment --------------------------------------------------------
 
     def issue_enrollment_code(self, *, ttl: float = ENROLLMENT_TTL_SECONDS) -> EnrollmentCode:
-        """Mint a single-use pairing code. The operator reads it off the host."""
+        """Mint a single-use pairing code. The operator reads it off the host.
+
+        The code is persisted to the trust store as a hash, so the process that
+        prints it (``herdr-notify enroll``) and the process that validates it
+        (the running ``serve`` gateway) can be the different processes they are:
+        the gateway notices the file changed via :meth:`reload_if_changed` and
+        accepts the code. Kept in memory alone, the code the CLI printed would
+        never reach the gateway and every fresh code would be refused.
+        """
         with self._lock:
             self._prune_codes()
             code = base64.b32encode(os.urandom(ENROLLMENT_CODE_BYTES)).decode().rstrip("=")
             now = float(self._clock())
             entry = EnrollmentCode(code=code, created_at=now, expires_at=now + ttl)
-            self._codes[code] = entry
+            self._codes[_enrollment_hash(code)] = entry
+            self._save()
             return entry
 
     def enroll(
@@ -369,7 +429,7 @@ class DeviceStore:
 
         now = float(self._clock())
         with self._lock:
-            entry = self._codes.get(code)
+            entry = self._codes.get(_enrollment_hash(code))
             if entry is None or not entry.valid_at(now):
                 self._prune_codes()
                 raise EnrollmentRejected("enrollment code is unknown, expired, or used")

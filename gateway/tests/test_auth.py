@@ -586,6 +586,43 @@ def test_the_trust_store_holds_no_private_material(tmp_path: Any) -> None:
     assert private_pem.decode().strip() not in raw
 
 
+def test_an_enrollment_code_minted_by_another_process_is_usable(tmp_path: Any) -> None:
+    """The `enroll` CLI and the gateway are separate processes over one file.
+
+    Regression: an enrollment code used to live only in the minting process's
+    memory, so a code printed by ``herdr-notify enroll`` was never visible to
+    the running gateway and every fresh code was refused with 403.
+    """
+    path = tmp_path / "devices.json"
+    gateway = DeviceStore(path)  # the long-lived server, no code yet
+    cli_code = DeviceStore(path).issue_enrollment_code().code  # a separate process
+
+    assert gateway.reload_if_changed() is True
+    device = gateway.enroll(
+        code=cli_code, curve=CURVE_P256, public_key=base64.b64encode(b"k").decode()
+    )
+    assert device.curve == CURVE_P256
+
+
+def test_an_enrollment_code_is_single_use_across_processes(tmp_path: Any) -> None:
+    path = tmp_path / "devices.json"
+    code = DeviceStore(path).issue_enrollment_code().code
+    DeviceStore(path).enroll(
+        code=code, curve=CURVE_P256, public_key=base64.b64encode(b"k").decode()
+    )
+    with pytest.raises(EnrollmentRejected):
+        DeviceStore(path).enroll(
+            code=code, curve=CURVE_P256, public_key=base64.b64encode(b"k").decode()
+        )
+
+
+def test_a_live_enrollment_code_is_stored_hashed_not_in_the_clear(tmp_path: Any) -> None:
+    path = tmp_path / "devices.json"
+    code = DeviceStore(path).issue_enrollment_code().code
+    raw = path.read_text(encoding="utf-8")
+    assert code not in raw, "the plaintext code must never be written to disk"
+
+
 # -- nonce cache -----------------------------------------------------------
 
 

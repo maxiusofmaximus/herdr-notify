@@ -61,3 +61,6 @@ session-*.md
 # UI review screenshots. Working artefacts of a visual pass, captured from a
 # device, not project files.
 android/ui4-shots/
+
+# Grafo de conocimiento generado por graphify (artefacto local, se regenera con `graphify update`).
+graphify-out/
