@@ -54,11 +54,14 @@ def build_signing_string(
     body: bytes,
     timestamp: int,
     nonce: str,
+    max_body: int = MAX_BODY_BYTES,
 ) -> bytes:
     """Build the byte string that is signed.
 
     ``target`` is the raw HTTP request target, e.g. ``/v1/agents/w1:p1/respond``.
-    It is not a parsed or normalised path.
+    It is not a parsed or normalised path. ``max_body`` lets an endpoint that
+    legitimately carries a large body raise the bound the caller already
+    enforced; the produced bytes do not depend on it.
     """
     if not method:
         raise CanonicalizationError("method is required")
@@ -70,9 +73,9 @@ def build_signing_string(
         raise CanonicalizationError("nonce must not contain a newline")
     if not nonce:
         raise CanonicalizationError("nonce is required")
-    if len(body) > MAX_BODY_BYTES:
+    if len(body) > max_body:
         raise CanonicalizationError(
-            f"body of {len(body)} bytes exceeds the {MAX_BODY_BYTES}-byte signing limit"
+            f"body of {len(body)} bytes exceeds the {max_body}-byte signing limit"
         )
 
     parts = (

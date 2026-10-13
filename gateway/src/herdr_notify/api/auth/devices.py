@@ -322,6 +322,7 @@ class DeviceStore:
                 fcm_token=fcm_token,
                 permissions=normalise_permissions(permissions),
                 owner_id=owner_id,
+                created_at=now,
                 # `_save` below writes the file, so this is the truthful
                 # "last persisted" time. Without it the first authenticated
                 # request from a freshly added device finds `persisted_at` unset,

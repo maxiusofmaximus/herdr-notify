@@ -335,4 +335,45 @@ class TranscriptTest {
         assertTrue(entries[1] is TranscriptEntry.Permission)
         assertEquals(TranscriptEntry.Agent("(esperando…)"), entries[2])
     }
+
+    @Test
+    fun `a unified diff becomes a changes block, not prose`() {
+        val tail = """
+            Voy a aplicar el cambio.
+
+            --- a/src/foo.kt
+            +++ b/src/foo.kt
+            @@ -1,3 +1,3 @@
+             fun main() {
+            -    old()
+            +    new()
+             }
+        """.trimIndent()
+
+        val entries = TranscriptParser.parse(tail)
+
+        assertEquals(2, entries.size)
+        assertEquals(TranscriptEntry.Agent("Voy a aplicar el cambio."), entries[0])
+        val changes = entries[1] as TranscriptEntry.Changes
+        assertTrue(
+            "an added diff line must be marked as added: ${changes.lines}",
+            changes.lines.any { it.kind == ChangeKind.ADDED && it.text == "+    new()" },
+        )
+        assertTrue(
+            "a removed diff line must be marked as removed: ${changes.lines}",
+            changes.lines.any { it.kind == ChangeKind.REMOVED && it.text == "-    old()" },
+        )
+        assertTrue(
+            "the hunk header is metadata, not a change: ${changes.lines}",
+            changes.lines.any { it.kind == ChangeKind.META && it.text.startsWith("@@") },
+        )
+    }
+
+    @Test
+    fun `a prose bullet is not mistaken for a diff`() {
+        val entries = TranscriptParser.parse(" - wQ:pJ: reenvié la tarea\n - wN:p8: sin resultado")
+
+        assertEquals(1, entries.size)
+        assertTrue(entries.single() is TranscriptEntry.Agent)
+    }
 }

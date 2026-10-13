@@ -118,4 +118,30 @@ class PairingUiStateTest {
         // paste an empty key and get a confusing rejection from the host.
         assertEquals(null, stateWith(publicKey = null).hostCommand)
     }
+
+    @Test
+    fun `a loopback or blank address is hidden and cannot pair`() {
+        // A build with no gatewayUrl defaults to loopback, which on a phone is
+        // the phone itself: it must not look like a filled, working address.
+        val loopback = stateWith(baseUrl = "http://127.0.0.1:8788", deviceId = "d")
+        assertEquals("", loopback.visibleBaseUrl)
+        assertFalse(loopback.canClaim)
+        assertFalse(loopback.canSave)
+
+        val localhost = stateWith(baseUrl = "http://localhost:8788", deviceId = "d")
+        assertEquals("", localhost.visibleBaseUrl)
+        assertFalse(localhost.canClaim)
+
+        val blank = stateWith(deviceId = "d")
+        assertEquals("", blank.visibleBaseUrl)
+        assertFalse(blank.canClaim)
+    }
+
+    @Test
+    fun `a routable address is shown and enables pairing`() {
+        val state = stateWith(baseUrl = "http://100.64.0.1:8788", deviceId = "d")
+        assertEquals("http://100.64.0.1:8788", state.visibleBaseUrl)
+        assertTrue(state.hasRoutableAddress)
+        assertTrue(state.canClaim)
+    }
 }

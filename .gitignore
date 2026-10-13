@@ -57,3 +57,7 @@ android/app/schemas/
 # governing v2 specification is replanteamiento.md, which is tracked on purpose.
 session-*.md
 *-session*.md
+
+# UI review screenshots. Working artefacts of a visual pass, captured from a
+# device, not project files.
+android/ui4-shots/

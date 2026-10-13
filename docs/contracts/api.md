@@ -28,6 +28,7 @@ The gateway binds loopback only. Reaching it from a phone is the transport's job
 | `POST` | `/v1/agents/{pane_id}/focus` | signed | `RESPOND` | write | Focus the pane |
 | `POST` | `/v1/agents/{pane_id}/seen` | signed | `READ_STATE` | write | Clear the "done" badge |
 | `POST` | `/v1/agents/{pane_id}/read` | signed | `READ_STATE` | **write** | Read recent pane output |
+| `POST` | `/v1/agents/{pane_id}/image` | signed | `RESPOND` | write | Store an image and prompt the agent with its path |
 | `POST` | `/v1/me/fcm-token` | signed | — (self-service) | write | Attach/replace this device's FCM token |
 | `POST` | `/v1/workspaces` | signed | `RESPOND` | write | Create a workspace and start a new opencode agent in it |
 
@@ -57,8 +58,13 @@ Nothing identifying: no herdr version, no pane names, no agent count.
 
 ### `POST /v1/agents/{pane_id}/respond`
 
-Body: `{ "text": "…" }` — 1…4000 characters, no control characters other than
-newline/tab. Response: the summarised action result.
+Body: `{ "text": "…" }` — non-empty, no control characters other than
+newline/tab. There is **no length cap** (updated: the old 4000-character limit
+and the `prompt_too_long` code are gone). Response: the summarised action result.
+
+> **IMPLEMENTED.** The only remaining bound is the transport-signed-body cap of
+> 256 KiB (`errors.md`), which is not a message-length rule; a longer message is
+> only possible for the image route below, which raises its own cap.
 
 ### `POST /v1/agents/{pane_id}/keys`
 
@@ -72,8 +78,10 @@ Body: `{ "keys": ["enter"], "confirm": false }` — 1…8 keys.
 
 ### `POST /v1/agents/{pane_id}/focus` / `.../seen`
 
-No body. `seen` is implemented as herdr's `agent.focus`, so the phone and the
-terminal can never disagree about what has been read.
+No body. `focus` calls herdr's `agent.focus`. `seen` is an acknowledged no-op:
+herdr 0.9.1 clears a "done" badge only through `agent.focus`, which would also
+move the operator's terminal, so the phone marks the agent seen locally and the
+gateway calls nothing (updated: this route no longer reaches herdr).
 
 ### `POST /v1/agents/{pane_id}/read`
 
@@ -82,6 +90,36 @@ Body: `{ "lines": 60 }` (optional). Clamped to 1…200, default 60. Response:
 ```json
 { "text": "…", "pane_id": "w1:p3" }
 ```
+
+### `POST /v1/agents/{pane_id}/image`
+
+Body: `{ "mime": "image/png", "data": "<base64>" }`.
+
+- `mime` is allowlisted: `image/png`, `image/jpeg` or `image/webp`.
+- `data` is standard base64 of the image bytes, at most 5 MiB decoded.
+- The bytes must actually be the declared container (PNG magic, JPEG `FF D8 FF`,
+  or a `RIFF….WEBP` header). A renamed file is refused, not stored.
+- The gateway writes the file under its data dir (`--images`, default
+  `~/.config/herdr-notify/images`) and submits the **absolute path** to the agent
+  as a prompt (`Imagen adjunta: <path>`), so the agent opens it with its own
+  tools. The file is removed again if herdr refuses the prompt.
+
+Response:
+
+```json
+{ "ok": true, "pane_id": "w1:p3",
+  "path": "/home/me/.config/herdr-notify/images/w1_p3-1a2b3c4d5e6f7890.png",
+  "result": { "pane_id": "w1:p3", "agent": "opencode", "agent_status": "idle" } }
+```
+
+Failures: `400` with an action code (`unsupported_type`, `invalid_image`,
+`empty_image`, `image_too_large`, `type_mismatch`), `403` without `RESPOND`,
+`409` if herdr refuses the prompt, `413` if the signed body exceeds the image
+cap. Requires `RESPOND`: attaching a picture drives the agent exactly as sending
+a prompt does.
+
+> **IMPLEMENTED.** The Android side (`ImageAttachment`, `sendImage`) validates
+> the same 5 MiB ceiling and the three types before sending.
 
 ### Action responses
 
@@ -118,7 +156,7 @@ Body: `{ "curve": "p256", "public_key": "<b64>", "label": "Pixel 9", "code": "HJ
 `recovery_code` is shown **once**; only a hash is stored. Failures answer
 `403 {"detail":"pairing_rejected"}` (uniform), `400 {"detail":"invalid_body"}`,
 `413`, or `429`. The exact resolution order (code → recovery → same-owner) is in
-[`pairing.md`](pairing.md) and `FASE2C.md`.
+[`pairing.md`](pairing.md).
 
 ### `GET /v1/devices` (signed, `ADMIN`)
 
@@ -145,3 +183,6 @@ re-serialised model. Consequently the server does not require
 `Content-Type: application/json`; the bytes are parsed directly as JSON by the
 signed-body parser. A correctly signed body with a missing or wrong content type
 is still valid.
+
+The signed-body cap is 256 KiB, raised on the image route only to fit a base64
+picture (`errors.md`).

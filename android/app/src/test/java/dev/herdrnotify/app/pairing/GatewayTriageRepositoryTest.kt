@@ -86,7 +86,7 @@ class GatewayTriageRepositoryTest {
         var registered = false
         val repository = GatewayTriageRepository(
             FakeKey(),
-            { Pairing(server.url("/").toString().trimEnd('/'), "d1") },
+            { Pairing("http://127.0.0.1:${server.port}", "d1") },
             CoroutineScope(SupervisorJob() + Dispatchers.IO),
             pendingToken = { parked },
             onTokenRegistered = {
@@ -122,7 +122,7 @@ class GatewayTriageRepositoryTest {
         var registered = false
         val repository = GatewayTriageRepository(
             FakeKey(),
-            { Pairing(server.url("/").toString().trimEnd('/'), "d1") },
+            { Pairing("http://127.0.0.1:${server.port}", "d1") },
             CoroutineScope(SupervisorJob() + Dispatchers.IO),
             pendingToken = { parked },
             onTokenRegistered = { registered = true },
@@ -159,7 +159,7 @@ class GatewayTriageRepositoryTest {
         }
         val repository = GatewayTriageRepository(
             FakeKey(),
-            { Pairing(server.url("/").toString().trimEnd('/'), "d1") },
+            { Pairing("http://127.0.0.1:${server.port}", "d1") },
             CoroutineScope(SupervisorJob() + Dispatchers.IO),
             pendingToken = { "tok-keep" },
             onTokenRegistered = {},
@@ -281,7 +281,7 @@ class GatewayTriageRepositoryTest {
 
     private fun repositoryFor(server: MockWebServer) = GatewayTriageRepository(
         FakeKey(),
-        { Pairing(server.url("/").toString().trimEnd('/'), "d1") },
+        { Pairing("http://127.0.0.1:${server.port}", "d1") },
         CoroutineScope(SupervisorJob() + Dispatchers.IO),
     )
 

@@ -49,56 +49,20 @@ val hasReleaseKey = keystoreProperties.getProperty("storeFile") != null
 val localProperties = Properties().apply {
     rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
 }
-/** Loopback always; the tailnet hosts from local.properties, nothing else. */
-fun networkSecurityConfigXml(tailnet: List<String>): String {
-    val domains = (listOf("127.0.0.1", "localhost", "10.0.2.2") + tailnet).joinToString("\n") {
-        "        <domain includeSubdomains=\"false\">$it</domain>"
-    }
-    return """<?xml version="1.0" encoding="utf-8"?>
-<!-- GENERATED from android/local.properties (tailnetHosts). Do not edit. -->
-<network-security-config>
-    <base-config cleartextTrafficPermitted="false">
-        <trust-anchors>
-            <certificates src="system" />
-        </trust-anchors>
-    </base-config>
-    <domain-config cleartextTrafficPermitted="true">
-$domains
-    </domain-config>
-</network-security-config>
-"""
-}
 
 val gatewayUrl = localProperties.getProperty("gatewayUrl")?.trim()
     ?.takeIf { it.isNotEmpty() } ?: "http://127.0.0.1:8788"
-val tailnetHosts = localProperties.getProperty("tailnetHosts").orEmpty()
-    .split(",").map { it.trim() }.filter { it.isNotEmpty() }
 
 android {
     namespace = "dev.herdrnotify.app"
     compileSdk = 36
 
-    // The cleartext allow-list comes from local.properties (tailnetHosts), so no
-    // tailnet address is committed. Written at configuration time: it is a few
-    // bytes, and a task would need dependencies on every resource consumer.
-    val networkConfigRes = file("build/generated/networkConfig/res")
-    file("$networkConfigRes/xml").mkdirs()
-    file("$networkConfigRes/xml/network_security_config.xml").writeText(
-        networkSecurityConfigXml(tailnetHosts),
-    )
-
-    sourceSets {
-        getByName("main") {
-            res.srcDir(networkConfigRes)
-        }
-    }
-
     defaultConfig {
         applicationId = "dev.herdrnotify.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.1.1"
+        versionCode = 4
+        versionName = "0.1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true

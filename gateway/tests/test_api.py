@@ -16,6 +16,7 @@ import base64
 import json
 import secrets
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -35,8 +36,10 @@ from herdr_notify.api.actions import (
     validate_prompt,
 )
 from herdr_notify.api.app import (
+    MAX_SIGNED_BODY,
     ApiConfig,
     AppContext,
+    _signed_body_limit,
     create_app,
     opening_state_frame,
     state_payload,
@@ -54,6 +57,7 @@ from herdr_notify.api.auth import (
     RequestVerifier,
     build_signing_string,
 )
+from herdr_notify.api.images import MAX_IMAGE_BODY_BYTES, image_prompt
 from herdr_notify.api.ratelimit import RateLimiter, StreamRegistry
 from herdr_notify.herdr.client import HerdrError
 from herdr_notify.state.models import Snapshot
@@ -115,11 +119,10 @@ def test_too_many_keys_are_refused() -> None:
     assert excinfo.value.code == "too_many_keys"
 
 
-def test_prompt_length_is_capped() -> None:
+def test_a_prompt_has_no_length_cap() -> None:
     assert validate_prompt("sí, hazlo") == "sí, hazlo"
-    with pytest.raises(ActionError) as excinfo:
-        validate_prompt("x" * 5000)
-    assert excinfo.value.code == "prompt_too_long"
+    long_message = "x" * 5000
+    assert validate_prompt(long_message) == long_message
 
 
 def test_empty_prompt_is_refused() -> None:
@@ -310,7 +313,14 @@ class Harness:
             client=self.herdr,  # type: ignore[arg-type]
             subscribers=set(),
         )
-        self.app = create_app(self.context, ApiConfig(device_store_path=tmp_path / "d.json"))
+        self.images = tmp_path / "images"
+        self.app = create_app(
+            self.context,
+            ApiConfig(
+                device_store_path=tmp_path / "d.json",
+                image_store_dir=self.images,
+            ),
+        )
         self.client = TestClient(self.app, raise_server_exceptions=False)
 
     def close(self) -> None:
@@ -322,7 +332,12 @@ class Harness:
         moment = int(time.time())
         unique = nonce or base64.b64encode(secrets.token_bytes(16)).decode()
         message = build_signing_string(
-            method=method, target=path, body=body, timestamp=moment, nonce=unique
+            method=method,
+            target=path,
+            body=body,
+            timestamp=moment,
+            nonce=unique,
+            max_body=MAX_IMAGE_BODY_BYTES,
         )
         signature = self.key.sign(message, ec.ECDSA(hashes.SHA256()))
         return {
@@ -351,7 +366,12 @@ class Harness:
         moment = int(time.time())
         nonce = base64.b64encode(secrets.token_bytes(16)).decode()
         message = build_signing_string(
-            method=method, target=path, body=body, timestamp=moment, nonce=nonce
+            method=method,
+            target=path,
+            body=body,
+            timestamp=moment,
+            nonce=nonce,
+            max_body=MAX_IMAGE_BODY_BYTES,
         )
         return {
             HEADER_DEVICE: device.device_id,
@@ -427,6 +447,14 @@ def test_an_unsigned_action_is_refused(app_client: Harness) -> None:
 
 def test_respond_reaches_herdr(app_client: Harness) -> None:
     response = app_client.call("POST", "/v1/agents/w1:p1/respond", {"text": "sí, hazlo"})
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+
+def test_a_chat_message_has_no_length_cap(app_client: Harness) -> None:
+    """A prompt longer than the old 4000-character cap still reaches herdr."""
+    message = "x" * 9000
+    response = app_client.call("POST", "/v1/agents/w1:p1/respond", {"text": message})
     assert response.status_code == 200
     assert response.json()["ok"] is True
 
@@ -517,6 +545,120 @@ def test_read_falls_back_to_visible_when_herdr_refuses_the_history_source(
     assert response.status_code == 200
     assert response.json()["text"] == "screen"
     assert seen_sources == [READ_SOURCE, READ_FALLBACK_SOURCE]
+
+
+# -- image attachments ------------------------------------------------------
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"fake png body"
+JPEG_BYTES = b"\xff\xd8\xff" + b"fake jpeg body"
+WEBP_BYTES = b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"fake webp body"
+
+
+def image_payload(data: bytes, mime: str) -> dict[str, str]:
+    return {"mime": mime, "data": base64.b64encode(data).decode()}
+
+
+def test_the_image_route_gets_its_own_body_cap() -> None:
+    """An encoded picture does not fit the 256 KiB every other body is held to."""
+    assert _signed_body_limit("/v1/agents/w1:p1/image") == MAX_IMAGE_BODY_BYTES
+    assert _signed_body_limit("/v1/agents/w1:p1/respond") == MAX_SIGNED_BODY
+    assert MAX_IMAGE_BODY_BYTES > MAX_SIGNED_BODY
+
+
+def test_image_requires_a_signature(app_client: Harness) -> None:
+    response = app_client.client.post(
+        "/v1/agents/w1:p1/image", json=image_payload(PNG_BYTES, "image/png")
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("data", "mime"),
+    [(PNG_BYTES, "image/png"), (JPEG_BYTES, "image/jpeg"), (WEBP_BYTES, "image/webp")],
+)
+def test_an_image_is_stored_and_its_path_is_prompted(
+    app_client: Harness, data: bytes, mime: str
+) -> None:
+    response = app_client.call("POST", "/v1/agents/w1:p1/image", image_payload(data, mime))
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["ok"] is True
+    assert body["pane_id"] == "w1:p1"
+
+    stored = Path(body["path"])
+    assert stored.is_file(), "the gateway should have written the image"
+    assert stored.parent == app_client.images.resolve()
+    assert stored.read_bytes() == data
+
+    prompts = [params for method, params in app_client.herdr.calls if method == "agent.prompt"]
+    assert prompts, "the agent should have been told where the image is"
+    assert prompts[-1]["text"] == image_prompt(stored)
+
+
+def test_an_image_larger_than_the_small_signed_cap_is_accepted(app_client: Harness) -> None:
+    """The per-route cap is what makes a multi-hundred-KB image possible."""
+    big = b"\x89PNG\r\n\x1a\n" + b"a" * 400_000
+    response = app_client.call("POST", "/v1/agents/w1:p1/image", image_payload(big, "image/png"))
+    assert response.status_code == 200
+    assert Path(response.json()["path"]).read_bytes() == big
+
+
+def test_a_read_only_device_cannot_send_an_image(app_client: Harness) -> None:
+    response = app_client.call_as(
+        app_client.restricted,
+        app_client.restricted_key,
+        "POST",
+        "/v1/agents/w1:p1/image",
+        image_payload(PNG_BYTES, "image/png"),
+    )
+    assert response.status_code == 403
+    assert response.json() == {"detail": "forbidden"}
+
+
+@pytest.mark.parametrize("mime", ["image/gif", "image/heic", "application/octet-stream"])
+def test_a_disallowed_image_type_is_refused(app_client: Harness, mime: str) -> None:
+    response = app_client.call("POST", "/v1/agents/w1:p1/image", image_payload(PNG_BYTES, mime))
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "unsupported_type"
+
+
+def test_an_image_whose_bytes_disagree_with_the_type_is_refused(app_client: Harness) -> None:
+    response = app_client.call(
+        "POST", "/v1/agents/w1:p1/image", image_payload(JPEG_BYTES, "image/png")
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "type_mismatch"
+
+
+def test_invalid_base64_image_data_is_refused(app_client: Harness) -> None:
+    response = app_client.call(
+        "POST", "/v1/agents/w1:p1/image", {"mime": "image/png", "data": "!!not base64!!"}
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "invalid_image"
+
+
+def test_a_bare_agent_name_is_refused_for_an_image(app_client: Harness) -> None:
+    response = app_client.call(
+        "POST", "/v1/agents/reviewer/image", image_payload(PNG_BYTES, "image/png")
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "bad_pane"
+
+
+def test_a_refused_prompt_removes_the_stored_image(app_client: Harness) -> None:
+    class Refusing:
+        async def request(
+            self, method: str, params: dict[str, Any] | None = None
+        ) -> dict[str, Any]:
+            raise HerdrError("agent.prompt: the agent is gone")
+
+    app_client.context.client = Refusing()  # type: ignore[assignment]
+    response = app_client.call(
+        "POST", "/v1/agents/w1:p1/image", image_payload(PNG_BYTES, "image/png")
+    )
+    assert response.status_code == 409
+    assert not app_client.images.exists() or not any(app_client.images.iterdir())
 
 
 def test_a_signature_does_not_transfer_to_another_path(app_client: Harness) -> None:

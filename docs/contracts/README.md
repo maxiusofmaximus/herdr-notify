@@ -30,9 +30,10 @@ purpose so no reader mistakes a defined shape for a working path.
 |---------|--------|-------|
 | Signed request auth (`p256`), anti-replay, trust store, revocation | IMPLEMENTED | [`auth.md`](auth.md), [`pairing.md`](pairing.md) |
 | `GET /v1/health`, `/v1/state`, `/v1/events`, all `/v1/agents/{pane_id}/*` actions | IMPLEMENTED | [`api.md`](api.md), [`state.md`](state.md) |
+| Image attachment (`POST /v1/agents/{pane_id}/image`: store + prompt the path) | IMPLEMENTED | [`api.md`](api.md) |
 | Push policy (`blocked`/`done`, cooldown, budget, quiet hours) | IMPLEMENTED (host-side) | [`push.md`](push.md) |
 | Per-device authorization (`READ_STATE`, `RESPOND`, …), endpoint matrix, uniform `403` | IMPLEMENTED (M2) | [`auth.md`](auth.md), [`api.md`](api.md) |
-| HTTP pairing endpoint (`POST /v1/pair`), recovery codes, tailnet auto-approval | IMPLEMENTED (Fase 2(c)) | [`pairing.md`](pairing.md), `FASE2C.md` |
+| HTTP pairing endpoint (`POST /v1/pair`), recovery codes, tailnet auto-approval | IMPLEMENTED (Fase 2(c)) | [`pairing.md`](pairing.md), [`api.md`](api.md) |
 | Device management (`GET /v1/devices`, revoke) behind `ADMIN` | IMPLEMENTED (Fase 2(c)) | [`auth.md`](auth.md), [`api.md`](api.md) |
 | Tailnet peer list (`GET /v1/peers`) for address probing | IMPLEMENTED (Fase 2(c)) | [`api.md`](api.md) |
 | FCM token lifecycle (park → register → store) | IMPLEMENTED (unit-verified, 2026-10-04) | [`push.md`](push.md) |

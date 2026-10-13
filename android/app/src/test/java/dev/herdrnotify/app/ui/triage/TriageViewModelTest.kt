@@ -441,6 +441,39 @@ class TriageViewModelTest {
     }
 
     @Test
+    fun `a plain approve answer is sent with confirm false`() = runTest {
+        val repo = FakeTriageRepository()
+        val vm = TriageViewModel(repo, backgroundScope)
+        repo.emit(ConnectionState.Live(stateWith(agent("w1:p1", AgentStatus.BLOCKED))))
+        vm.onOpenAgent("w1:p1")
+        runCurrent()
+
+        vm.onPermissionKeys(listOf("enter"), confirmed = false)
+        runCurrent()
+
+        assertEquals(
+            listOf(Triple("w1:p1", listOf("enter"), false)),
+            repo.keyBatches,
+        )
+    }
+
+    @Test
+    fun `a message longer than any client limit is still sent`() = runTest {
+        val repo = FakeTriageRepository()
+        val vm = TriageViewModel(repo, backgroundScope)
+        repo.emit(ConnectionState.Live(stateWith(agent("w1:p1", AgentStatus.BLOCKED))))
+        vm.onOpenAgent("w1:p1")
+        runCurrent()
+
+        val long = "x".repeat(20_000)
+        vm.onDraftChange(long)
+        vm.onSend()
+        runCurrent()
+
+        assertEquals(listOf("w1:p1" to long), repo.replies)
+    }
+
+    @Test
     fun `a refused permission answer is shown, not swallowed`() = runTest {
         val repo = FakeTriageRepository()
         repo.sendKeysResult = Result.failure(GatewayClient.GatewayError.NotPermitted("forbidden"))

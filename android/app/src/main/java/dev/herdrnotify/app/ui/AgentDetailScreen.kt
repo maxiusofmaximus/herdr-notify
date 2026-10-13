@@ -1,7 +1,11 @@
 package dev.herdrnotify.app.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +35,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -47,7 +54,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +63,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,7 +73,7 @@ import dev.herdrnotify.app.domain.AgentSummary
 import dev.herdrnotify.app.ui.theme.LocalStatusColors
 import dev.herdrnotify.app.ui.theme.Spacing
 import dev.herdrnotify.app.ui.triage.AgentDetail
-import dev.herdrnotify.app.ui.triage.TriageViewModel
+import dev.herdrnotify.app.ui.triage.PendingImage
 
 /**
  * One agent: what it is doing, its recent turns, and a box to answer it.
@@ -94,6 +101,8 @@ fun AgentDetailScreen(
     onConfirmSend: () -> Unit,
     onDismissConfirm: () -> Unit,
     onPermissionKeys: (List<String>, Boolean) -> Unit,
+    onAttachImage: (ByteArray, String) -> Unit,
+    onClearAttachment: () -> Unit,
 ) {
     // The system back gesture closes the detail, rather than leaving the app.
     BackHandler(onBack = onBack)
@@ -143,6 +152,7 @@ fun AgentDetailScreen(
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = { ChatHeaderTitle(agent = agent, paneId = detail.paneId) },
@@ -172,6 +182,8 @@ fun AgentDetailScreen(
                 detail = detail,
                 onDraftChange = onDraftChange,
                 onSend = onSend,
+                onAttachImage = onAttachImage,
+                onClearAttachment = onClearAttachment,
             )
         },
     ) { insets ->
@@ -234,7 +246,8 @@ private fun ChatHeaderTitle(agent: AgentSummary?, paneId: String) {
             overflow = TextOverflow.Ellipsis,
         )
         if (agent != null) {
-            val accent = LocalStatusColors.current.forStatus(agent.status)
+            val statusColors = LocalStatusColors.current
+            val accent = statusColors.forStatus(agent.status)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier
@@ -246,7 +259,7 @@ private fun ChatHeaderTitle(agent: AgentSummary?, paneId: String) {
                 Text(
                     text = statusLabel(agent.status),
                     style = MaterialTheme.typography.bodySmall,
-                    color = accent,
+                    color = statusColors.label(agent.status),
                     maxLines = 1,
                 )
                 val title = agent.title?.takeIf { it.isNotBlank() }
@@ -341,7 +354,7 @@ private fun Transcript(
     modifier: Modifier = Modifier,
 ) {
     val scroll = rememberScrollState()
-    LaunchedEffect(entries) { scroll.scrollTo(scroll.maxValue) }
+    AutoScrollToBottom(scroll)
 
     Column(
         modifier = modifier
@@ -355,6 +368,7 @@ private fun Transcript(
                 is TranscriptEntry.Agent -> Bubble(text = entry.text, fromUser = false)
                 is TranscriptEntry.Status -> StatusRow(entry)
                 is TranscriptEntry.Permission -> PermissionCard(entry.prompt, onPermissionOption)
+                is TranscriptEntry.Changes -> ChangesBlock(entry)
             }
         }
     }
@@ -415,6 +429,40 @@ private fun PermissionCard(prompt: PermissionPrompt, onOption: (PermissionOption
                         ) { Text(option.label) }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChangesBlock(changes: TranscriptEntry.Changes) {
+    val colors = LocalStatusColors.current
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            Modifier
+                .horizontalScroll(rememberScrollState())
+                .padding(Spacing.md),
+        ) {
+            changes.lines.forEach { line ->
+                val color = when (line.kind) {
+                    ChangeKind.ADDED -> colors.done
+                    ChangeKind.REMOVED -> MaterialTheme.colorScheme.error
+                    ChangeKind.META -> MaterialTheme.colorScheme.primary
+                    ChangeKind.CONTEXT -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
+                Text(
+                    text = line.text,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                    ),
+                    color = color,
+                    softWrap = false,
+                )
             }
         }
     }
@@ -559,7 +607,7 @@ private fun RecapBlock(text: String) {
 @Composable
 private fun RawOutput(output: String, modifier: Modifier = Modifier) {
     val scroll = rememberScrollState()
-    LaunchedEffect(output) { scroll.scrollTo(scroll.maxValue) }
+    AutoScrollToBottom(scroll)
 
     Box(
         modifier = modifier
@@ -596,7 +644,20 @@ private fun Composer(
     detail: AgentDetail,
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
+    onAttachImage: (ByteArray, String) -> Unit,
+    onClearAttachment: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val pickImage = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        // Reading on the callback thread is fine for the few-megabyte ceiling
+        // the validator enforces; a failure is reported as an unreadable image.
+        readImage(context, uri)?.let { (bytes, mime) -> onAttachImage(bytes, mime) }
+            ?: onAttachImage(ByteArray(0), "")
+    }
+
     Column(
         Modifier
             .fillMaxWidth()
@@ -614,13 +675,30 @@ private fun Composer(
             )
             Spacer(Modifier.height(Spacing.xs))
         }
+        detail.attachment?.let { image ->
+            AttachmentChip(image = image, enabled = !detail.sending, onRemove = onClearAttachment)
+            Spacer(Modifier.height(Spacing.xs))
+        }
         Row(verticalAlignment = Alignment.Bottom) {
+            IconButton(
+                onClick = {
+                    pickImage.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                    )
+                },
+                enabled = !detail.sending,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.AttachFile,
+                    contentDescription = "Adjuntar imagen",
+                )
+            }
             OutlinedTextField(
                 value = detail.draft,
-                onValueChange = { if (it.length <= TriageViewModel.MAX_MESSAGE_CHARS) onDraftChange(it) },
+                onValueChange = onDraftChange,
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("Escribe una respuesta…") },
-                maxLines = 4,
+                maxLines = 6,
                 enabled = !detail.sending,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { onSend() }),
@@ -631,6 +709,49 @@ private fun Composer(
                 enabled = detail.draft.isNotBlank() && !detail.sending,
             ) {
                 Text("Enviar")
+            }
+        }
+    }
+}
+
+/**
+ * The picked image, before it is sent. It shows only what the person needs to
+ * confirm the choice — that it is an image, and how big — with a one-tap way to
+ * drop it. The picture itself is not decoded here: the transport is still
+ * pending on the host, and a thumbnail would be work spent on a payload that
+ * cannot leave the phone yet.
+ */
+@Composable
+private fun AttachmentChip(image: PendingImage, enabled: Boolean, onRemove: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = Spacing.md, end = Spacing.xs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Image,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(Spacing.sm))
+            Text(
+                text = "Imagen · ${image.bytes.size / 1024} KB",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = onRemove, enabled = enabled) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "Quitar imagen",
+                )
             }
         }
     }

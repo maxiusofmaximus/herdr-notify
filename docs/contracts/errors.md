@@ -10,7 +10,7 @@ Authoritative code: `gateway/src/herdr_notify/api/{app,actions,ratelimit}.py`.
 | `401` | `"unauthorized"` | Any authentication rejection (uniform — see below) |
 | `403` | `"forbidden"` | Any authorization rejection (uniform — see below) |
 | `409` | herdr's own message | herdr declined the action (legitimate answer, not a fault) |
-| `413` | `"body too large"` | Body exceeds the cap (8 KB enroll/pair, 256 KB signed) |
+| `413` | `"body too large"` | Body exceeds the cap (8 KB enroll/pair, 256 KB signed, image route's own larger cap) |
 | `422` | `{ "code": "invalid_body", "errors": [...] }` | A signed body failed model validation |
 | `429` | `"slow down"` / `"too many open streams"` | Rate limit, or per-device stream cap |
 
@@ -23,12 +23,18 @@ Authoritative code: `gateway/src/herdr_notify/api/{app,actions,ratelimit}.py`.
 | Status | `detail` | When |
 |--------|----------|------|
 | `400` | `"invalid_body"` | not JSON, missing `curve`/`public_key`, unsupported curve |
-| `403` | `"pairing_rejected"` | code/recovery unknown, expired, used, or device revoked; no code and the source IP is not the host's tailnet owner; Tailscale unavailable |
+| `403` | `"pairing_rejected"` (string) | a supplied code/recovery code is unknown, expired, used, or the device is revoked |
+| `403` | `{ "code": "pairing_rejected", "message": … }` | no code was supplied and the source IP is not the host's tailnet owner; Tailscale unavailable |
 | `413` | `"body too large"` | body > 8 KiB |
 | `429` | `"slow down"` | per-source-IP limit (`Retry-After`) |
 
-`pairing_rejected` is **uniform**: the caller is never told which code or which
-check failed, the same oracle reasoning as the uniform `401`/`403`.
+For a **supplied code**, `pairing_rejected` is **uniform**: the caller is never
+told which code or which check failed, the same oracle reasoning as the uniform
+`401`/`403`. When **no code** was supplied there is only the tailnet-owner check
+to fail, and the caller already knows it sent no code, so the refusal is a
+`{code, message}` object whose message names the working path
+(`herdr-notify enroll`) and, for a loopback source, the local-proxy cause. It
+never reports whose account owns an address.
 
 ## Order of checks
 
@@ -87,8 +93,15 @@ Returned in the `400` body as `{ "code": "...", "message": "..." }`.
 | `confirmation_required` | A guarded key (`ctrl+c`) without `confirm: true` |
 | `key_not_allowed` | A key outside the allowlist |
 | `empty_prompt` | A blank prompt |
-| `prompt_too_long` | A prompt over 4000 characters |
 | `control_characters` | A prompt with terminal control characters |
+| `unsupported_type` | An image whose declared type is not png/jpeg/webp, or whose bytes are none of them |
+| `invalid_image` | Image `data` is not valid base64 |
+| `empty_image` | Image `data` decodes to zero bytes |
+| `image_too_large` | Decoded image over 5 MiB |
+| `type_mismatch` | Declared image type does not match the bytes |
+
+There is no `prompt_too_long` code any more: prompts have no length cap
+(2026-10-13).
 
 These codes are stable identifiers the app may branch on. They are not
 localised; the app renders its own text.

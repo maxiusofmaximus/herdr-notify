@@ -39,6 +39,7 @@ from .canonical import (
     HEADER_NONCE,
     HEADER_SIGNATURE,
     HEADER_TIMESTAMP,
+    MAX_BODY_BYTES,
     CanonicalizationError,
     build_signing_string,
 )
@@ -223,6 +224,7 @@ class RequestVerifier:
         target: str,
         body: bytes,
         headers: dict[str, str],
+        max_body_bytes: int | None = None,
     ) -> VerifiedRequest:
         """Authenticate, or raise :class:`AuthError`."""
 
@@ -278,6 +280,7 @@ class RequestVerifier:
                 body=body,
                 timestamp=timestamp,
                 nonce=nonce or "",
+                max_body=max_body_bytes or MAX_BODY_BYTES,
             )
         except CanonicalizationError as exc:
             raise AuthError(Rejection.MALFORMED) from exc

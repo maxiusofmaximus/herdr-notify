@@ -84,4 +84,8 @@
 
     <string name="notification_permission_rationale">Sin permiso de avisos, no podemos scandirte cuando un agente se queda esperando. El equipo sigue funcionando igual.</string>
     <string name="notification_permission_allow">Permitir avisos</string>
+    <string name="notification_title">Avisos de agentes</string>
+    <string name="notification_blocked_title">Avisos desactivados</string>
+    <string name="notification_blocked_body">Has bloqueado los avisos de esta app. Actívalos en los ajustes del sistema para enterarte cuando un agente espera tu respuesta o termina.</string>
+    <string name="notification_open_settings">Abrir ajustes</string>
 </resources>

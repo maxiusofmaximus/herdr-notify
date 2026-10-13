@@ -1,11 +1,15 @@
 package dev.herdrnotify.app
 
 import android.Manifest
+import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,8 +18,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import dev.herdrnotify.app.push.HerdrMessagingService
+import dev.herdrnotify.app.push.NotificationPermissionPolicy
+import dev.herdrnotify.app.push.NotificationPermissionStep
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,9 +30,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -34,9 +47,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -51,6 +67,8 @@ import dev.herdrnotify.app.recovery.openTailscale
 import dev.herdrnotify.app.ui.AgentDetailScreen
 import dev.herdrnotify.app.ui.DevicesScreen
 import dev.herdrnotify.app.ui.GatewayDialog
+import dev.herdrnotify.app.ui.NewConversationScreen
+import dev.herdrnotify.app.ui.StateBlock
 import dev.herdrnotify.app.ui.TriageList
 import dev.herdrnotify.app.ui.theme.HerdrNotifyTheme
 import dev.herdrnotify.app.ui.theme.Spacing
@@ -72,7 +90,14 @@ class MainActivity : ComponentActivity() {
         get() = (application as HerdrNotifyApplication).container
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
+        // The app is dark on every system setting, so the system bars get the
+        // light icons explicitly. The no-argument enableEdgeToEdge() reads the
+        // *system* night mode, which on a light-mode phone draws a pale
+        // navigation bar with dark icons and hides the bar against our dark UI.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         super.onCreate(savedInstanceState)
         setContent {
             HerdrNotifyTheme {
@@ -145,15 +170,23 @@ private fun App(container: AppContainer) {
     // address, so clearing the pairing would be the wrong move.
     var showPairing by rememberSaveable { mutableStateOf(false) }
 
-    if (pairing.isComplete && !showPairing) {
-        TriageApp(container, onRepair = { showPairing = true })
-    } else {
-        PairingRoute(
-            container,
-            // Only offer a way back when there is a paired state to return to.
-            onBack = if (pairing.isComplete) ({ showPairing = false }) else null,
-            onPaired = { showPairing = false },
-        )
+    // One explicit ground for the whole app. Without it a screen that does not
+    // paint its own background falls through to the window colour, which is how
+    // light Material surfaces ended up sitting on a dark frame.
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+    ) {
+        if (pairing.isComplete && !showPairing) {
+            TriageApp(container, onRepair = { showPairing = true })
+        } else {
+            PairingRoute(
+                container,
+                // Only offer a way back when there is a paired state to return to.
+                onBack = if (pairing.isComplete) ({ showPairing = false }) else null,
+                onPaired = { showPairing = false },
+            )
+        }
     }
 }
 
@@ -174,6 +207,7 @@ private fun PairingRoute(
                     // The one unauthenticated write: POST /v1/pair.
                     pair = { url, request -> container.pairingApi.pair(url, request) },
                     recoveryCodes = container.recoveryCodes,
+                    peers = { url -> container.peers.peers(url) },
                 ) as T
         }
     }
@@ -192,6 +226,8 @@ private fun PairingRoute(
         onRepairWithRecovery = viewModel::repairWithRecovery,
         onCommit = { viewModel.commitClaim { onPaired?.invoke() } },
         onDismissRecovery = viewModel::dismissRecovery,
+        onPickPeer = viewModel::onPickPeer,
+        onRefreshPeers = viewModel::onRefreshPeers,
     )
 }
 
@@ -209,6 +245,7 @@ private fun TriageApp(container: AppContainer, onRepair: () -> Unit) {
     val viewModel: TriageViewModel = viewModel(factory = factory)
     val state by viewModel.state.collectAsStateWithLifecycle()
     val detail by viewModel.detail.collectAsStateWithLifecycle()
+    val newChat by viewModel.newChat.collectAsStateWithLifecycle()
 
     // The guided reconnect screen's own state. Its dependencies are handed to it
     // rather than looked up inside, so it stays a plain JVM-testable object: the
@@ -256,11 +293,26 @@ private fun TriageApp(container: AppContainer, onRepair: () -> Unit) {
             onConfirmSend = viewModel::onConfirmSend,
             onDismissConfirm = viewModel::onDismissConfirm,
             onPermissionKeys = viewModel::onPermissionKeys,
+            onAttachImage = viewModel::onAttachImage,
+            onClearAttachment = viewModel::onClearAttachment,
         )
         return
     }
 
-    val now = rememberNowMillis()
+    // "Nueva conversación" is its own screen, like the detail and the device
+    // list: a create in flight and a host refusal need room to be read. It is
+    // closed by the ViewModel the moment a conversation opens, so closing that
+    // chat returns to the list rather than the form.
+    if (newChat.open) {
+        NewConversationScreen(
+            state = newChat,
+            onCreate = viewModel::onNewChat,
+            onBack = viewModel::onCloseNewChat,
+            onDismissError = viewModel::onDismissNewChatError,
+        )
+        return
+    }
+
     var showGateway by rememberSaveable { mutableStateOf(false) }
     var gatewayError by rememberSaveable { mutableStateOf<String?>(null) }
     var showDevices by rememberSaveable { mutableStateOf(false) }
@@ -311,9 +363,15 @@ private fun TriageApp(container: AppContainer, onRepair: () -> Unit) {
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
+                    // The clock is read here, inside the title, and not at the
+                    // screen's top level: a value read at the top would make the
+                    // whole one recompose on every tick — the triage list
+                    // included — for a subtitle that changes once a minute.
+                    val now = rememberNowMillis()
                     Column {
                         Text(
                             text = stringResource(R.string.triage_title),
@@ -352,6 +410,7 @@ private fun TriageApp(container: AppContainer, onRepair: () -> Unit) {
                 is ConnectionState.Connecting -> Message(
                     R.string.state_connecting,
                     R.string.state_connecting,
+                    loading = true,
                 )
 
                 is ConnectionState.Failed -> NoConnectionScreen(
@@ -372,14 +431,14 @@ private fun TriageApp(container: AppContainer, onRepair: () -> Unit) {
                     TriageList(
                         state = current.lastKnown,
                         onOpen = { viewModel.onOpenAgent(it.paneId) },
-                        onNewChat = viewModel::onNewChat,
+                        onNewChat = viewModel::onOpenNewChat,
                     )
                 }
 
                 is ConnectionState.Live -> TriageList(
                     state = current.state,
                     onOpen = { viewModel.onOpenAgent(it.paneId) },
-                    onNewChat = viewModel::onNewChat,
+                    onNewChat = viewModel::onOpenNewChat,
                 )
             }
         }
@@ -387,56 +446,109 @@ private fun TriageApp(container: AppContainer, onRepair: () -> Unit) {
 }
 
 @Composable
-private fun Message(titleRes: Int, bodyRes: Int, onChangeGateway: (() -> Unit)? = null) {
-    Column(Modifier.padding(Spacing.xl)) {
-        Text(
-            text = stringResource(titleRes),
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
+private fun Message(
+    titleRes: Int,
+    bodyRes: Int,
+    loading: Boolean = false,
+    onChangeGateway: (() -> Unit)? = null,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(Spacing.xl),
+        contentAlignment = Alignment.Center,
+    ) {
+        StateBlock(
+            icon = {
+                if (loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(28.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Filled.CloudOff,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            title = stringResource(titleRes),
+            body = stringResource(bodyRes),
+            // A failed connection is often the address, not the host: a Tailscale
+            // name that moved. Offering the change here is the fix for that case.
+            action = if (onChangeGateway != null) {
+                { TextButton(onClick = onChangeGateway) { Text("Cambiar gateway") } }
+            } else {
+                null
+            },
         )
-        Text(
-            text = stringResource(bodyRes),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        // A failed connection is often the address, not the host: a Tailscale
-        // name that moved. Offering the change here is the fix for that case.
-        if (onChangeGateway != null) {
-            Spacer(Modifier.height(Spacing.lg))
-            TextButton(onClick = onChangeGateway) { Text("Cambiar gateway") }
-        }
     }
 }
 
 /**
  * Android 13+ shows nothing until the user grants POST_NOTIFICATIONS, and a push
- * that is silently dropped looks exactly like a broken backend. Ask once per
- * session, with a short reason first, and never nag after a refusal.
+ * that is silently dropped looks exactly like a broken backend. Ask once — with
+ * a short reason first — and, when the system will no longer show the dialog,
+ * send the person to the settings page instead of asking into the void.
  */
 @Composable
 private fun NotificationPermissionPrompt() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val granted = ContextCompat.checkSelfPermission(
         context,
         Manifest.permission.POST_NOTIFICATIONS,
     ) == PackageManager.PERMISSION_GRANTED
     var asked by rememberSaveable { mutableStateOf(false) }
     val launcher = rememberLauncherForNotificationPermission { asked = true }
-    if (granted || asked) return
+    val rationale = (context as? Activity)?.let {
+        ActivityCompat.shouldShowRequestPermissionRationale(it, Manifest.permission.POST_NOTIFICATIONS)
+    } ?: false
 
-    AlertDialog(
-        onDismissRequest = { asked = true },
-        title = { Text("Avisos de agentes") },
-        text = { Text("Permite las notificaciones para enterarte cuando un agente espera tu respuesta.") },
-        confirmButton = {
-            TextButton(onClick = { launcher() }) { Text("Permitir") }
-        },
-        dismissButton = {
-            TextButton(onClick = { asked = true }) { Text("Ahora no") }
-        },
-    )
+    when (NotificationPermissionPolicy.step(Build.VERSION.SDK_INT, granted, asked, rationale)) {
+        NotificationPermissionStep.NOT_NEEDED -> return
+        NotificationPermissionStep.ASK -> AlertDialog(
+            onDismissRequest = { asked = true },
+            title = { Text(stringResource(R.string.notification_title)) },
+            text = { Text(stringResource(R.string.notification_permission_rationale)) },
+            confirmButton = {
+                TextButton(onClick = { launcher() }) {
+                    Text(stringResource(R.string.notification_permission_allow))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { asked = true }) { Text("Ahora no") }
+            },
+        )
+
+        NotificationPermissionStep.OPEN_SETTINGS -> AlertDialog(
+            onDismissRequest = { asked = true },
+            title = { Text(stringResource(R.string.notification_blocked_title)) },
+            text = { Text(stringResource(R.string.notification_blocked_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        openNotificationSettings(context)
+                        asked = true
+                    },
+                ) { Text(stringResource(R.string.notification_open_settings)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { asked = true }) { Text("Ahora no") }
+            },
+        )
+    }
 }
+
+/** The app's own notification page. There is no more specific deep link. */
+private fun openNotificationSettings(context: Context) {
+    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+        .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { context.startActivity(intent) }
+}
+
 
 @Composable
 private fun rememberLauncherForNotificationPermission(onResult: () -> Unit): () -> Unit {

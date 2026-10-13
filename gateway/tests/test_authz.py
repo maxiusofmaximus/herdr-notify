@@ -148,6 +148,7 @@ def test_the_endpoint_matrix_is_exact() -> None:
         ("POST", "/v1/agents/w1:p1/focus", Permission.RESPOND),
         ("POST", "/v1/agents/w1:p1/seen", Permission.READ_STATE),
         ("POST", "/v1/agents/w1:p1/read", Permission.READ_STATE),
+        ("POST", "/v1/agents/w1:p1/image", Permission.RESPOND),
         ("POST", "/v1/me/fcm-token", None),
         ("post", "/v1/me/fcm-token", None),
         ("get", "/v1/health", None),

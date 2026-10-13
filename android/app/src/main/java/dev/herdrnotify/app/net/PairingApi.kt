@@ -70,7 +70,7 @@ interface PairingApi {
 }
 
 class HttpPairingApi(
-    private val http: OkHttpClient = OkHttpClient(),
+    private val http: OkHttpClient = OkHttpClient.Builder().tailnetCleartextOnly().build(),
 ) : PairingApi {
 
     override suspend fun pair(baseUrl: String, request: PairRequest): Result<PairResponse> =

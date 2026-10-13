@@ -1,58 +1,82 @@
 package dev.herdrnotify.app.pairing
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.herdrnotify.app.ui.Caption
+import dev.herdrnotify.app.ui.CommandBlock
+import dev.herdrnotify.app.ui.CopyButton
+import dev.herdrnotify.app.ui.ErrorText
+import dev.herdrnotify.app.ui.HerdrCard
+import dev.herdrnotify.app.ui.ValueRow
+import dev.herdrnotify.app.ui.copyToClipboard
+import dev.herdrnotify.app.ui.theme.MonoKey
 import dev.herdrnotify.app.ui.theme.Spacing
+import dev.herdrnotify.app.ui.theme.TextPrimary
+import dev.herdrnotify.app.ui.theme.TextSecondary
 
 /**
  * Pairing, shown when the app has no device identity yet.
  *
- * Two ways in, deliberately:
- *
- *  * **By code** — the operator runs one command on the host, which prints a
- *    short, single-use code. Typing it here calls the gateway's one
- *    unauthenticated write (`POST /v1/pair`), which registers this phone. A
- *    blank code is the auto-approval path: the host accepts the phone when the
- *    source address is its own tailnet owner.
- *  * **By hand** — the fingerprint and the `herdr-notify add-device` command, for
- *    a host reached over a link where `tailscale whois` cannot answer.
+ * One flow, not three. The card at the top is the whole fast path: the operator
+ * runs `herdr-notify enroll`, types the short code, and the gateway registers the
+ * phone — or leaves the code blank and the host approves it because the source
+ * address is its own tailnet owner. The fingerprint, the `add-device` command,
+ * the device id and the gateway URL are still here, but folded under "Avanzado":
+ * they are for the host reached over a link where `tailscale whois` cannot answer,
+ * and putting them on the surface made a one-tap job look like a checklist.
  *
  * The recovery code a successful pairing returns is shown once, in a dialog that
  * will not close until it is acknowledged: it is the only way back in without
@@ -75,19 +99,22 @@ fun PairingScreen(
     onRepairWithRecovery: () -> Unit = {},
     onCommit: () -> Unit = {},
     onDismissRecovery: () -> Unit = {},
+    onPickPeer: (TailnetPeer) -> Unit = {},
+    onRefreshPeers: () -> Unit = {},
 ) {
+    val context = LocalContext.current
+
     if (state.isLoading) {
-        Column(
-            modifier = modifier.fillMaxSize(),
-            verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.systemBars),
+            contentAlignment = Alignment.Center,
         ) {
-            CircularProgressIndicator()
+            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
         }
         return
     }
-
-    val context = LocalContext.current
 
     // Shown exactly once per pairing, and not dismissable: the recovery code is
     // the only path back in without the host, and a tap outside must not lose it.
@@ -99,29 +126,49 @@ fun PairingScreen(
         )
     }
 
+    var advanced by rememberSaveable { mutableStateOf(false) }
+
     Column(
         modifier = modifier
             .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.ime))
             .verticalScroll(rememberScrollState())
-            .padding(Spacing.lg),
-        verticalArrangement = Arrangement.spacedBy(Spacing.md),
+            .padding(horizontal = Spacing.lg, vertical = Spacing.md),
+        verticalArrangement = Arrangement.spacedBy(Spacing.lg),
     ) {
         if (onBack != null) {
-            TextButton(onClick = onBack) { Text("Volver") }
+            TextButton(
+                onClick = onBack,
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(Spacing.sm))
+                Text("Volver")
+            }
         }
-        Text(
-            text = "Emparejar con el host",
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
-            text = "La clave se genera aquí y no sale del teléfono. Regístrala con un " +
-                "código, o pégala en el host por comando.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
 
-        // -- 0. the fast path: code, or auto-approval -------------------------
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            Text(
+                text = "Emparejar este teléfono",
+                style = MaterialTheme.typography.headlineSmall,
+                color = TextPrimary,
+            )
+            Text(
+                text = "La clave se genera aquí y no sale del teléfono. Regístrala con un " +
+                    "código, o déjalo vacío para aprobarla desde el host.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextSecondary,
+            )
+        }
+
+        PcAddressCard(state = state, onBaseUrl = onBaseUrl)
+
+        PeerPickerCard(state = state, onPickPeer = onPickPeer, onRefresh = onRefreshPeers)
+
         PairingCodeCard(
             state = state,
             onCode = onCode,
@@ -129,133 +176,137 @@ fun PairingScreen(
             onRepairWithRecovery = onRepairWithRecovery,
         )
 
-        // -- 1. identity -----------------------------------------------------
-        SectionHeader("1 · Identidad de este teléfono")
-        Text(
-            text = "Huella de la clave pública",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text = state.fingerprint.orEmpty(),
-            style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.semantics {
-                contentDescription = "Huella de la clave: ${state.fingerprint.orEmpty()}"
-            },
-        )
-        Text(
-            text = "Compara esta huella con la que muestre el host antes de continuar. " +
-                "Es lo que confirma que registraste esta clave y no otra.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        AdvancedToggle(expanded = advanced, onToggle = { advanced = !advanced })
 
-        OutlinedTextField(
-            value = state.deviceId,
-            onValueChange = onDeviceId,
-            label = { Text("Identificador del dispositivo") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        // -- 2. the host command --------------------------------------------
-        SectionHeader("2 · En el host")
-        Text(
-            text = "Ejecuta esto en la máquina que corre el gateway:",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            ),
-        ) {
-            Text(
-                text = state.hostCommand.orEmpty(),
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 4,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(Spacing.md),
-            )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            OutlinedButton(
-                onClick = { context.copyToClipboard("herdr-notify add-device", state.hostCommand.orEmpty()) },
-                modifier = Modifier.weight(1f),
-            ) {
-                Text("Copiar comando")
-            }
-            OutlinedButton(
-                onClick = { context.copyToClipboard(state.deviceId, state.publicKey.orEmpty()) },
-                modifier = Modifier.weight(1f),
-            ) {
-                Text("Copiar clave")
-            }
-        }
-
-        // -- 3. address ------------------------------------------------------
-        SectionHeader("3 · Dónde está el gateway")
-        OutlinedTextField(
-            value = state.baseUrl,
-            onValueChange = onBaseUrl,
-            label = { Text("URL del gateway") },
-            placeholder = { Text("https://<tu-equipo>.<tailnet>.ts.net") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Uri,
-                imeAction = ImeAction.Done,
-            ),
-            supportingText = {
-                Text("El nombre Tailscale del host. Sin https:// se añade automáticamente.")
-            },
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        state.error?.let { error ->
-            Text(
-                text = error,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
+        if (advanced) {
+            AdvancedSection(
+                state = state,
+                onDeviceId = onDeviceId,
+                onSave = onSave,
+                onResetKey = onResetKey,
             )
         }
 
-        Button(
-            onClick = onSave,
-            enabled = state.canSave,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp),
-        ) {
-            Text("Guardar y continuar")
-        }
-
-        Spacer(Modifier.height(Spacing.sm))
-
-        OutlinedButton(
-            onClick = onResetKey,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Generar una clave nueva")
-        }
-        Text(
-            text = "La clave antigua seguirá registrada en el host hasta que la revoques " +
-                "con `herdr-notify devices`. Esta pantalla no puede hacerlo por ti: " +
-                "revocar es un acto deliberado en el host, no algo que un teléfono " +
-                "pueda pedir por su cuenta.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
         Spacer(Modifier.height(Spacing.xl))
     }
 }
 
+@Composable
+private fun PcAddressCard(
+    state: PairingUiState,
+    onBaseUrl: (String) -> Unit,
+) {
+    HerdrCard {
+        OutlinedTextField(
+            value = state.visibleBaseUrl,
+            onValueChange = onBaseUrl,
+            label = { Text("Dirección de tu PC") },
+            placeholder = { Text("http://<IP-tailscale-del-PC>:8788") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Uri,
+                imeAction = ImeAction.Next,
+            ),
+            supportingText = {
+                Text("La IP de Tailscale de tu PC y el puerto del gateway")
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = "Dirección de tu PC" },
+        )
+    }
+}
+
+@Composable
+private fun PeerPickerCard(
+    state: PairingUiState,
+    onPickPeer: (TailnetPeer) -> Unit,
+    onRefresh: () -> Unit,
+) {
+    HerdrCard {
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Equipos en tu tailnet",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary,
+                    modifier = Modifier.weight(1f),
+                )
+                if (state.peersLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    TextButton(onClick = onRefresh) { Text("Buscar") }
+                }
+            }
+            when {
+                state.peers.isNotEmpty() -> {
+                    Caption("Toca un equipo para usar su dirección.")
+                    state.peers.forEach { peer ->
+                        PeerRow(peer = peer, onClick = { onPickPeer(peer) })
+                    }
+                }
+
+                state.peersUnavailable ->
+                    Caption("No se pudo leer la lista de equipos. Escribe la dirección a mano.")
+
+                else ->
+                    Caption("Escribe la dirección del equipo, o búscalo si ya está emparejado.")
+            }
+        }
+    }
+}
+
+@Composable
+private fun PeerRow(peer: TailnetPeer, onClick: () -> Unit) {
+    val dot = if (peer.online) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(dot),
+            )
+            Spacer(Modifier.width(Spacing.sm))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = peer.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = peer.addresses.firstOrNull().orEmpty() +
+                        if (peer.online) " · en línea" else " · desconectado",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
 /**
- * The short-code entry, plus the recovery-code re-pair when one is held.
+ * The fast path: a short code, or a blank one for the tailnet auto-approval.
  *
  * The hint about the blank code is not decoration: auto-approval is the fastest
  * way in and the least obvious, so it is stated where the field is.
@@ -267,29 +318,19 @@ private fun PairingCodeCard(
     onClaim: () -> Unit,
     onRepairWithRecovery: () -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(Spacing.md),
-            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-        ) {
-            Text(
-                text = "Código de emparejamiento",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                text = "En el host, ejecuta `herdr-notify enroll` y escribe aquí el " +
-                    "código que imprima. Si el equipo es tuyo en Tailscale, déjalo " +
-                    "vacío y se aprobará solo.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+    HerdrCard {
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                Text(
+                    text = "Código de emparejamiento",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary,
+                )
+                Caption(
+                    "En el host, ejecuta herdr-notify enroll y escribe aquí el código que " +
+                        "imprima. Si el equipo es tuyo en Tailscale, déjalo vacío y se aprobará solo.",
+                )
+            }
             OutlinedTextField(
                 value = state.code,
                 onValueChange = onCode,
@@ -303,19 +344,13 @@ private fun PairingCodeCard(
                     .fillMaxWidth()
                     .semantics { contentDescription = "Código de emparejamiento" },
             )
-            state.codeError?.let { error ->
-                Text(
-                    text = error,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
+            state.codeError?.let { ErrorText(it) }
             Button(
                 onClick = onClaim,
                 enabled = state.canClaim,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 48.dp),
+                    .height(52.dp),
             ) {
                 if (state.claiming) {
                     CircularProgressIndicator(
@@ -344,6 +379,121 @@ private fun PairingCodeCard(
     }
 }
 
+/** A plain row that reveals the manual path. Kept off the surface by default. */
+@Composable
+private fun AdvancedToggle(expanded: Boolean, onToggle: () -> Unit) {
+    val rotation by animateFloatAsState(if (expanded) 180f else 0f, label = "advanced")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable(onClick = onToggle)
+            .semantics {
+                contentDescription = if (expanded) "Ocultar opciones avanzadas" else "Mostrar opciones avanzadas"
+            },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Avanzado: emparejar a mano",
+            style = MaterialTheme.typography.labelLarge,
+            color = TextSecondary,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            imageVector = Icons.Filled.ExpandMore,
+            contentDescription = null,
+            tint = TextSecondary,
+            modifier = Modifier.rotate(rotation),
+        )
+    }
+}
+
+/**
+ * The manual path, unchanged in behaviour from the original screen.
+ *
+ * The fingerprint and the device id are shown for real or said to be pending —
+ * never left as an empty labelled box, which reads as a fault. The command and
+ * the key scroll sideways and copy in one tap.
+ */
+@Composable
+private fun AdvancedSection(
+    state: PairingUiState,
+    onDeviceId: (String) -> Unit,
+    onSave: () -> Unit,
+    onResetKey: () -> Unit,
+) {
+    val context = LocalContext.current
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.lg)) {
+        HerdrCard {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Identidad de este teléfono",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextPrimary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (!state.publicKey.isNullOrBlank()) {
+                        CopyButton(text = state.publicKey, label = "Copiar clave pública")
+                    }
+                }
+                ValueRow(
+                    label = "Huella de la clave pública",
+                    value = state.fingerprint,
+                    placeholder = "Generando la clave…",
+                    mono = true,
+                )
+                Caption(
+                    "Compara esta huella con la que muestre el host antes de continuar. Es lo " +
+                        "que confirma que registraste esta clave y no otra.",
+                )
+                OutlinedTextField(
+                    value = state.deviceId,
+                    onValueChange = onDeviceId,
+                    label = { Text("Identificador del dispositivo") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            Caption("Ejecuta esto en la máquina que corre el gateway:")
+            CommandBlock(
+                label = "herdr-notify add-device",
+                command = state.hostCommand.orEmpty(),
+                copyLabel = "Copiar comando",
+            )
+        }
+
+        state.error?.let { ErrorText(it) }
+
+        Button(
+            onClick = onSave,
+            enabled = state.canSave,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+        ) {
+            Text("Guardar y continuar")
+        }
+        OutlinedButton(
+            onClick = onResetKey,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp),
+        ) {
+            Text("Generar una clave nueva")
+        }
+        Caption(
+            "La clave antigua seguirá registrada en el host hasta que la revoques con " +
+                "herdr-notify devices. Esta pantalla no puede hacerlo por ti: revocar es un " +
+                "acto deliberado en el host.",
+        )
+    }
+}
+
 /**
  * Show the recovery code once.
  *
@@ -366,12 +516,12 @@ private fun RecoveryCodeDialog(
                     text = "Se muestra una sola vez. Sirve para volver a emparejar este " +
                         "teléfono sin ayuda del equipo.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = TextSecondary,
                 )
                 Text(
                     text = code,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MonoKey,
+                    color = TextPrimary,
                     modifier = Modifier.semantics {
                         contentDescription = "Código de recuperación: $code"
                     },
@@ -390,26 +540,4 @@ private fun RecoveryCodeDialog(
             TextButton(onClick = onContinue) { Text("Continuar") }
         },
     )
-}
-
-@Composable
-private fun SectionHeader(text: String) {
-    Spacer(Modifier.height(Spacing.sm))
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-    )
-}
-
-/**
- * Copy with a label the user will recognise later.
- *
- * Android 13+ shows a system toast for clipboard writes, so a second in-app
- * confirmation would be noise. The label is what makes the clipboard entry
- * identifiable in the paste menu.
- */
-private fun Context.copyToClipboard(label: String, text: String) {
-    val manager = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
-    manager.setPrimaryClip(ClipData.newPlainText(label, text))
 }

@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi.testclient import TestClient
 
-from herdr_notify.api.app import ApiConfig, AppContext, create_app
+from herdr_notify.api.app import ApiConfig, AppContext, _empty_code_detail, create_app
 from herdr_notify.api.auth import (
     CURVE_P256,
     HEADER_DEVICE,
@@ -188,6 +188,29 @@ def test_a_malformed_pairing_body_is_refused(harness: Harness) -> None:
     assert harness.client.post("/v1/pair", json={"curve": CURVE_P256}).status_code == 400
 
 
+def test_a_pairing_body_over_the_cap_is_refused(harness: Harness) -> None:
+    response = harness.client.post("/v1/pair", content=b"x" * (8 * 1024 + 1))
+    assert response.status_code == 413
+    assert response.json() == {"detail": "body too large"}
+
+
+def test_pairing_by_code_records_the_creation_time(harness: Harness) -> None:
+    phone = harness.pair("pixel")
+    device = harness.devices.get(phone.device_id)
+    assert device is not None
+    assert device.created_at > 0.0
+
+
+def test_pairing_by_code_works_when_tailscale_is_unavailable(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The code path is the host's own proof; it must not need the tailnet."""
+    monkeypatch.setattr("herdr_notify.api.app.read_tailnet_status", lambda: None)
+    monkeypatch.setattr("herdr_notify.api.app.tailnet_whois", lambda ip: None)
+    code = harness.devices.issue_enrollment_code().code
+    assert Phone("pixel").pair(harness.client, code=code).status_code == 200
+
+
 # -- (2) tailnet auto-approval ----------------------------------------------
 
 
@@ -215,6 +238,55 @@ def test_auto_approval_is_refused_when_tailscale_is_unavailable(
     monkeypatch.setattr("herdr_notify.api.app.read_tailnet_status", lambda: None)
     monkeypatch.setattr("herdr_notify.api.app.tailnet_whois", lambda ip: None)
     assert Phone("pixel").pair(harness.client).status_code == 403
+
+
+def test_auto_approval_is_refused_for_a_tagged_node(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tagged node reports no owner, so it must never auto-approve."""
+    monkeypatch.setattr("herdr_notify.api.app.read_tailnet_status", lambda: host_view())
+    monkeypatch.setattr("herdr_notify.api.app.tailnet_whois", lambda ip: None)
+    assert Phone("pixel").pair(harness.client).status_code == 403
+
+
+def test_a_code_less_pairing_is_refused_with_guidance(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without a code the owner check is the only proof, so say so.
+
+    The caller already knows it sent no code, so naming that and the working
+    path (`herdr-notify enroll`) leaks nothing while turning a baffling refusal
+    into an instruction. It must not report the tailnet owner either side.
+    """
+    monkeypatch.setattr("herdr_notify.api.app.read_tailnet_status", lambda: host_view("12345"))
+    monkeypatch.setattr("herdr_notify.api.app.tailnet_whois", lambda ip: Whois(owner_id="999"))
+    response = Phone("pixel").pair(harness.client)
+    assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert detail["code"] == "pairing_rejected"
+    assert "enroll" in detail["message"]
+    assert "12345" not in detail["message"]
+    assert "999" not in detail["message"]
+
+
+def test_the_empty_code_hint_calls_out_a_local_proxy() -> None:
+    local = _empty_code_detail("127.0.0.1")
+    remote = _empty_code_detail("100.64.0.2")
+    assert local["code"] == remote["code"] == "pairing_rejected"
+    assert "proxy" in local["message"]
+    assert local["message"] != remote["message"]
+
+
+def test_auto_approval_records_the_creation_time(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("herdr_notify.api.app.read_tailnet_status", lambda: host_view())
+    monkeypatch.setattr("herdr_notify.api.app.tailnet_whois", lambda ip: Whois(owner_id="12345"))
+    response = Phone("pixel").pair(harness.client)
+    assert response.status_code == 200
+    device = harness.devices.get(response.json()["device_id"])
+    assert device is not None
+    assert device.created_at > 0.0
 
 
 # -- (3) the peer list the phone probes -------------------------------------
@@ -247,6 +319,16 @@ def test_peers_lists_addresses_for_a_paired_device(
 
 def test_peers_requires_a_signature(harness: Harness) -> None:
     assert harness.client.get("/v1/peers").status_code == 401
+
+
+def test_peers_is_503_when_tailscale_is_unavailable(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    phone = harness.pair("pixel")
+    monkeypatch.setattr("herdr_notify.api.app.read_tailnet_status", lambda: None)
+    response = harness.client.get("/v1/peers", headers=phone.sign("GET", "/v1/peers"))
+    assert response.status_code == 503
+    assert response.json() == {"detail": "tailscale unavailable"}
 
 
 # -- (4) my devices: list and revoke ----------------------------------------

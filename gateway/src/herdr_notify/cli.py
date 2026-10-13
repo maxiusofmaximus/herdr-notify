@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import signal
 import socket
 import sys
@@ -131,6 +132,86 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             return 0
 
         return asyncio.run(_ping())
+    return 0
+
+
+_SERVICE_TASK = "herdr-notify-gateway"
+
+
+def _gateway_log_path() -> Path:
+    """The supervised gateway's log, matching run-gateway-supervised.ps1."""
+    base = os.environ.get("LOCALAPPDATA")
+    root = Path(base) if base else Path.home() / ".local" / "share"
+    return root / "herdr-notify" / "gateway.log"
+
+
+def _device_totals(devices: Iterable[Any]) -> tuple[int, int, int]:
+    """Reduce a trust-store listing to (total, active, revoked)."""
+    total = active = revoked = 0
+    for device in devices:
+        total += 1
+        if device.revoked:
+            revoked += 1
+        else:
+            active += 1
+    return total, active, revoked
+
+
+def _port_listening(host: str, port: int, timeout: float = 0.5) -> bool:
+    """True when something accepts a loopback connection on host:port.
+
+    A connect attempt is the one probe that cannot lie: a listening socket is
+    the gateway, and nothing at all is the gateway not being up.
+    """
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    """Report the PC-side view: endpoint, trust store, gateway and logs.
+
+    Read-only and offline by design, so it stays useful when herdr is down. The
+    service task's own state lives in tooling/herdr-notify-service.ps1 status;
+    what matters here is whether a gateway is actually answering on the port.
+    """
+    from .api.auth import DeviceStore
+    from .tailnet import read_status
+
+    print(f"platform       : {sys.platform}")
+    print(f"python         : {sys.version.split()[0]}")
+
+    try:
+        endpoint = Endpoint.resolve(args.session)
+        print(f"herdr endpoint : {endpoint.describe()}")
+    except Exception as exc:
+        print(f"herdr endpoint : FAILED — {exc}")
+
+    try:
+        devices = DeviceStore(args.devices)
+        total, active, revoked = _device_totals(devices.list())
+        print(f"trust store    : {devices.path or args.devices}")
+        print(f"devices        : {total} enrolled, {active} active, {revoked} revoked")
+    except Exception as exc:
+        print(f"trust store    : FAILED — {exc}")
+
+    reach = "127.0.0.1"
+    if _port_listening(reach, args.port):
+        print(f"gateway        : listening on {reach}:{args.port}")
+    else:
+        print(f"gateway        : not listening on {reach}:{args.port}")
+
+    view = read_status()
+    if view is not None and view.self_peer is not None and view.self_peer.addresses:
+        print(f"tailscale      : {', '.join(view.self_peer.addresses)} ({view.backend_state})")
+    else:
+        print("tailscale      : unavailable")
+
+    print(f"log            : {_gateway_log_path()}")
+    print()
+    print(f"service        : tooling\\herdr-notify-service.ps1 status  ({_SERVICE_TASK})")
     return 0
 
 
@@ -452,6 +533,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         context,
         ApiConfig(
             device_store_path=args.devices,
+            image_store_dir=args.images,
         ),
     )
     app.state.policy = PushPolicy(quiet_hours=_parse_quiet_hours(args.quiet_hours))
@@ -657,6 +739,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     default_store = Path.home() / ".config" / "herdr-notify" / "devices.json"
 
+    status = sub.add_parser(
+        "status", help="report the endpoint, trust store, gateway and log state"
+    )
+    status.add_argument("--devices", type=Path, default=default_store, help="trust store path")
+    status.add_argument("--port", type=int, default=8787, help="gateway port to probe")
+    status.add_argument("--session", help="herdr session name")
+    status.set_defaults(func=_cmd_status)
+
     from .api.auth import SUPPORTED_PERMISSIONS
 
     permission_choices = sorted(SUPPORTED_PERMISSIONS)
@@ -729,6 +819,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--timeout", type=float, default=10.0, help="herdr request timeout")
     serve.add_argument("--boot-timeout", type=float, default=30.0)
     serve.add_argument("--devices", type=Path, default=default_store, help="trust store path")
+    serve.add_argument(
+        "--images",
+        type=Path,
+        default=Path.home() / ".config" / "herdr-notify" / "images",
+        help="directory where attached images are stored",
+    )
     serve.add_argument(
         "--quiet-hours", metavar="START-END", help="local hours to defer review pushes, e.g. 23-7"
     )

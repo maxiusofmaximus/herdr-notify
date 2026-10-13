@@ -85,7 +85,7 @@ class GatewayAddressTest {
      */
     @Test
     fun `saving a new address reconnects against the new gateway`() = runBlocking {
-        var pairing = Pairing(oldHost.url("/").toString().trimEnd('/'), "phone-1")
+        var pairing = Pairing("http://127.0.0.1:${oldHost.port}", "phone-1")
         val repository = GatewayTriageRepository(
             FakeKey(),
             { pairing },
@@ -102,7 +102,7 @@ class GatewayAddressTest {
         repository.connect()
         assertTrue("the first connection goes to the old host", awaitRequest(oldHost, "/v1/state") != null)
 
-        val newUrl = newHost.url("/").toString().trimEnd('/')
+        val newUrl = "http://127.0.0.1:${newHost.port}"
         val result = address.change(newUrl)
 
         assertTrue(result.isSuccess)

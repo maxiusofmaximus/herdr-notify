@@ -4,7 +4,7 @@ Authoritative code: `gateway/src/herdr_notify/api/auth/devices.py`,
 `gateway/src/herdr_notify/cli.py` (`add-device`, `enroll`, `devices`),
 `android/.../security/DeviceKeyStore.kt`, `android/.../pairing/`.
 
-## Device identity
+## Device identity — IMPLEMENTED
 
 Each install generates a P-256 key **inside the Android Keystore**. The private
 key never leaves the device, is never exportable, and is never sent anywhere. The
@@ -15,11 +15,13 @@ public key is transmitted in the encoding the gateway verifies:
 
 The device id is a host-side label (`dev-<16 hex>` by default), not a secret.
 
-## How pairing actually works today
+## Pairing — IMPLEMENTED
 
-Pairing is a **host-side act**. There is no HTTP enrollment endpoint, and that
-absence is a security decision, not an unfinished feature: an unauthenticated
-write that registers devices would make key-based authentication pointless.
+Pairing has two implemented paths, and both land in the same trust store.
+
+**Host-side CLI — IMPLEMENTED.** The operator runs a command on the machine that
+runs the gateway. The app's pairing screen cannot submit anything; its whole job
+is to present the command with the device's own public key pre-filled.
 
 ```
 iOS/Android app                    operator's machine
@@ -34,9 +36,6 @@ app connects signed       ──▶      running gateway picks up the file
                                    change without a restart
 ```
 
-The app's pairing screen cannot submit anything; its whole job is to present a
-correct, copyable command. The command is a single line
-
 ```
 herdr-notify add-device --curve p256 --public-key <b64> --label <name>
 ```
@@ -45,10 +44,18 @@ The running gateway notices a changed trust store (`reload_if_changed`) and
 rebuilds its device list, so pairing a phone does not require restarting the
 service.
 
+**HTTP `POST /v1/pair` — IMPLEMENTED (Fase 2(c)).** The one unauthenticated
+write, gated by a host-printed code, a per-device recovery code, or tailnet
+ownership (see *Enrollment codes* below). It grants only the `READ_STATE`
+pairing default. The wire contract — request body, resolution order, response
+and errors — is in [`api.md`](api.md) and [`errors.md`](errors.md);
+`gateway/src/herdr_notify/api/app.py` is authoritative.
+
 ## Enrollment codes — IMPLEMENTED (Fase 2(c))
 
-Pairing has an HTTP path now: `POST /v1/pair` (see `FASE2C.md` for the exact
-wire contract). It is the **only unauthenticated write**, and it is gated by one
+Pairing has an HTTP path now: `POST /v1/pair` (see [`api.md`](api.md) and
+[`errors.md`](errors.md) for the exact wire contract; `app.py` is
+authoritative). It is the **only unauthenticated write**, and it is gated by one
 of three proofs, never a static secret:
 
 ```
@@ -60,8 +67,15 @@ POST /v1/pair {curve, public_key, label, code}
   ├─ code is a live RECOVERY code  ──▶  re-key that device, rotate the code
   └─ no code, source IP is the host's own tailnet owner (tailscale whois)
                                     ──▶  register a new device
-  ✗ anything else                   ──▶  403 {"detail":"pairing_rejected"}
+  ✗ anything else                   ──▶  403 pairing_rejected
 ```
+
+An **empty pairing code is the exception, not the normal path.** It works only
+when the caller's source IP belongs to the host's own tailnet owner; any other
+address (a different account, a tagged node, an unavailable daemon, or a request
+that arrived through a proxy) is refused with `403 pairing_rejected`. The normal
+path is a **code from `herdr-notify enroll`**, which the operator reads off the
+host and enters once on the phone.
 
 - **Pairing code**: `DeviceStore.issue_enrollment_code` — 4 random bytes, base32,
   600 s TTL, **single use**. `herdr-notify enroll` prints it. The store validates
@@ -73,14 +87,20 @@ POST /v1/pair {curve, public_key, label, code}
   be used for a revoked device.
 - **Auto-approval**: with no code, `tailscale whois --json <source-ip>` must
   report the same `UserProfile.ID` as the host's own `Self.UserID`. A different
-  account, a tagged node, or an unavailable daemon never auto-approves.
-- Every failure answers the uniform `403 {"detail":"pairing_rejected"}`; the
-  endpoint is rate-limited per source IP.
+  account, a tagged node, or an unavailable daemon never auto-approves. A
+  **local `tailscale serve` proxy** makes the request arrive from a loopback
+  address, which has no tailnet owner, so it can never auto-approve: run
+  `herdr-notify enroll` and use the code.
+- A **supplied code** that fails answers the uniform
+  `403 {"detail":"pairing_rejected"}` (updated: an empty code now answers a
+  slightly clearer `403 {code, message}` naming `herdr-notify enroll`, since the
+  caller already knows it sent no code and only the owner check could have
+  failed; it still reveals no owner). The endpoint is rate-limited per source IP.
 
 The host-side `add-device` CLI remains the manual path to the same result, and
 is still the way to grant anything beyond the `READ_STATE` pairing default.
 
-## Trust store
+## Trust store — IMPLEMENTED
 
 - Path: `~/.config/herdr-notify/devices.json` (override with `--devices`).
 - Shape: `{ "version": 1, "devices": [ {device…} ] }`, keys sorted, pretty JSON.
@@ -115,7 +135,7 @@ A device record:
 the API. `recovery_code_hash` is a SHA-256 of the recovery code — the code
 itself is never stored; `owner_id` is the `tailscale whois` owner (informational).
 
-## Permissions (authorization)
+## Permissions (authorization) — IMPLEMENTED (READ_STATE default; APPROVE RESERVED)
 
 A record carries an explicit grant set — the per-device permissions of
 [`auth.md`](auth.md). Pairing grants `READ_STATE` and nothing else; the rest are
@@ -138,7 +158,7 @@ herdr-notify devices --revoke-permission <id> --permission respond
   whose `READ_STATE` was revoked stays refused on the read paths (`403`).
 - `herdr-notify devices` lists each device's permissions.
 
-## Revocation
+## Revocation — IMPLEMENTED
 
 ```
 herdr-notify devices                 # list, with REVOKED markers
@@ -155,3 +175,20 @@ Since Fase 2(c), an `ADMIN`-granted device can also do this over HTTP:
 - Effect is immediate: `RequireDevice` checks `revoked` before any cryptography,
   so the next request gets `401`.
 - Revoking one device does not affect any other device's key.
+
+## Implementation status
+
+| Capability | Status |
+|------------|--------|
+| Device identity (P-256 / Ed25519 public key in the keystore) | IMPLEMENTED |
+| Host-side `add-device` CLI pairing | IMPLEMENTED |
+| `POST /v1/pair` (code / recovery / tailnet owner) | IMPLEMENTED (Fase 2(c)) |
+| Pairing codes (4 bytes, 600 s, single use) | IMPLEMENTED |
+| Recovery codes (re-key, rotate, SHA-256 hash only) | IMPLEMENTED |
+| Tailnet auto-approval (`tailscale whois`, same owner) | IMPLEMENTED |
+| Trust store (atomic writes, fail closed, live reload) | IMPLEMENTED |
+| `READ_STATE` pairing default | IMPLEMENTED |
+| Device management (`GET /v1/devices`, `POST /v1/devices/{id}/revoke`) behind `ADMIN` | IMPLEMENTED (Fase 2(c)) |
+| Tailnet peer list (`GET /v1/peers`, `503` when unavailable) | IMPLEMENTED |
+| HTTP grant endpoint | NOT IMPLEMENTED — widening access is a host-side CLI act by design |
+| `APPROVE` permission endpoints | RESERVED — a valid grantable id with no endpoint in v1 |

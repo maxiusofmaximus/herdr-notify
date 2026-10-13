@@ -105,6 +105,19 @@ data class WireReadResult(
 )
 
 /**
+ * The result of `POST /v1/workspaces`: the pane a fresh opencode conversation
+ * was started in. The app opens that pane's chat immediately, so the person
+ * lands in the conversation they just created instead of hunting for the new
+ * row in the list.
+ */
+@Serializable
+data class WireNewChatResult(
+    val ok: Boolean = false,
+    @SerialName("workspace_id") val workspaceId: String? = null,
+    @SerialName("pane_id") val paneId: String? = null,
+)
+
+/**
  * Lenient decoding, deliberately.
  *
  * The gateway speaks `ensure_ascii=False` JSON and the app is the only thing
@@ -139,6 +152,20 @@ object Wire {
 
     fun readText(data: String): String? = runCatching {
         json.decodeFromString<WireReadResult>(data).text
+    }.getOrNull()
+
+    /**
+     * The pane id a new conversation was created in, or null.
+     *
+     * Null covers both a malformed body and a gateway that answered `ok` without
+     * a pane — the screen says the conversation could not be opened rather than
+     * silently doing nothing.
+     */
+    fun newChatPaneId(data: String): String? = runCatching {
+        json.decodeFromString<WireNewChatResult>(data)
+            .takeIf { it.ok }
+            ?.paneId
+            ?.takeIf { it.isNotBlank() }
     }.getOrNull()
 
     fun ok(data: String): Boolean = runCatching {

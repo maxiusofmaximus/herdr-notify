@@ -47,6 +47,18 @@ interface TriageRepository {
     suspend fun sendKey(paneId: String, key: String, confirmed: Boolean)
 
     /**
+     * Send an image to an agent, to accompany the message the person is about to
+     * send.
+     *
+     * `docs/contracts/api.md` has no image endpoint yet, so the default fails
+     * with a clear, non-fatal reason and the screen reports it as a pending
+     * capability. The seam exists now so the day the gateway grows the route,
+     * only this override changes.
+     */
+    suspend fun sendImage(paneId: String, bytes: ByteArray, mime: String): Result<Unit> =
+        Result.failure(UnsupportedOperationException("imágenes no soportadas por el gateway"))
+
+    /**
      * Send several keys as one answer, e.g. an arrow to move a permission
      * highlight and `enter` to choose it.
      *
@@ -62,7 +74,17 @@ interface TriageRepository {
     }
 
     suspend fun refresh()
-    suspend fun newChat(name: String) {}
+
+    /**
+     * Start a fresh conversation (one workspace, one opencode agent) and return
+     * the pane it was created in.
+     *
+     * The outcome is returned rather than swallowed: if it fails the person is
+     * standing in front of a "create" button and has to be told why nothing
+     * happened. A success with a null pane means the host created the
+     * conversation but did not name the pane, which the screen reports too.
+     */
+    suspend fun newChat(name: String): Result<String?> = Result.success(null)
 }
 
 /**
@@ -91,6 +113,9 @@ class UnpairedTriageRepository : TriageRepository {
     override suspend fun sendKey(paneId: String, key: String, confirmed: Boolean) = Unit
 
     override suspend fun refresh() = Unit
+
+    override suspend fun newChat(name: String): Result<String?> =
+        Result.failure(IllegalStateException("sin emparejar"))
 }
 
 /**
@@ -117,11 +142,15 @@ class FakeTriageRepository(
     val keys = mutableListOf<Triple<String, String, Boolean>>()
     val keyBatches = mutableListOf<Triple<String, List<String>, Boolean>>()
     val reads = mutableListOf<Pair<String, Int>>()
+    val newChats = mutableListOf<String>()
+    val images = mutableListOf<Triple<String, Int, String>>()
 
     /** What the next calls return. Tests set these to script a failure. */
     var respondResult: Result<Unit> = Result.success(Unit)
     var readResult: Result<String> = Result.success("salida del agente")
     var sendKeysResult: Result<Unit> = Result.success(Unit)
+    var newChatResult: Result<String?> = Result.success(null)
+    var sendImageResult: Result<Unit> = Result.success(Unit)
 
     override suspend fun markSeen(paneId: String) {
         seen += paneId
@@ -141,6 +170,11 @@ class FakeTriageRepository(
         keys += Triple(paneId, key, confirmed)
     }
 
+    override suspend fun sendImage(paneId: String, bytes: ByteArray, mime: String): Result<Unit> {
+        images += Triple(paneId, bytes.size, mime)
+        return sendImageResult
+    }
+
     override suspend fun sendKeys(
         paneId: String,
         keys: List<String>,
@@ -151,6 +185,11 @@ class FakeTriageRepository(
     }
 
     override suspend fun refresh() = Unit
+
+    override suspend fun newChat(name: String): Result<String?> {
+        newChats += name
+        return newChatResult
+    }
 
     /** Set the state and yield, so a downstream collector observes it. */
     suspend fun emit(state: ConnectionState) {

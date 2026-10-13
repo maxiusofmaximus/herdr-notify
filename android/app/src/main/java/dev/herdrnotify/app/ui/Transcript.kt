@@ -43,7 +43,20 @@ sealed interface TranscriptEntry {
     data class Permission(val prompt: PermissionPrompt) : TranscriptEntry {
         override val text: String get() = prompt.detail ?: prompt.title
     }
+
+    /**
+     * A file-change diff the agent printed, drawn as its own block rather than
+     * poured into a bubble: the `+`/`-` structure is the information, and
+     * de-wrapping it into prose destroys it.
+     */
+    data class Changes(val lines: List<ChangeLine>) : TranscriptEntry {
+        override val text: String get() = lines.joinToString("\n") { it.text }
+    }
 }
+
+enum class ChangeKind { ADDED, REMOVED, CONTEXT, META }
+
+data class ChangeLine(val kind: ChangeKind, val text: String)
 
 enum class StatusKind {
     /** `Cogitated for 59s · done 11:44`, `6% until auto-compact`. */
@@ -194,6 +207,7 @@ object TranscriptParser {
         data class User(val text: String) : Token
         data class Agent(val text: String) : Token
         data class Status(val text: String, val kind: StatusKind) : Token
+        data class Changes(val lines: List<ChangeLine>) : Token
     }
 
     /** A permission block: the half-open line range it occupies, and its prompt. */
@@ -262,8 +276,9 @@ object TranscriptParser {
         // first line opens a buffer and the rest of the paragraph joins it,
         // until a blank line or a rule ends the block.
         var recap: MutableList<String>? = null
-        for (srcLine in lines) {
-            val line = srcLine.trimEnd()
+        var i = 0
+        while (i < lines.size) {
+            val line = lines[i].trimEnd()
             if (recap != null) {
                 if (line.isBlank() || rule.matches(line)) {
                     tokens += Token.Status(dewrap(recap), StatusKind.RECAP)
@@ -272,7 +287,22 @@ object TranscriptParser {
                 } else {
                     recap.add(stripMarkers(line))
                 }
+                i++
                 continue
+            }
+
+            if (changeAnchor(line)) {
+                val block = mutableListOf<ChangeLine>()
+                var j = i
+                while (j < lines.size && isChangeLine(lines[j])) {
+                    block += changeLine(lines[j])
+                    j++
+                }
+                if (block.any { it.kind == ChangeKind.ADDED } && block.any { it.kind == ChangeKind.REMOVED }) {
+                    tokens += Token.Changes(block)
+                    i = j
+                    continue
+                }
             }
 
             val token = classify(line)
@@ -281,10 +311,35 @@ object TranscriptParser {
             } else {
                 tokens += token
             }
+            i++
         }
         recap?.let { tokens += Token.Status(dewrap(it), StatusKind.RECAP) }
         return tokens
     }
+
+    private fun changeAnchor(line: String): Boolean =
+        line.startsWith("@@") ||
+            line.startsWith("+++ ") ||
+            line.startsWith("--- ") ||
+            line.startsWith("diff --git")
+
+    private fun isChangeLine(line: String): Boolean =
+        line.startsWith("@@") ||
+            line.startsWith("+") ||
+            line.startsWith("-") ||
+            line.startsWith(" ")
+
+    private fun changeLine(line: String): ChangeLine = ChangeLine(
+        kind = when {
+            line.startsWith("+++") || line.startsWith("---") ||
+                line.startsWith("@@") || line.startsWith("diff ") -> ChangeKind.META
+
+            line.startsWith("+") -> ChangeKind.ADDED
+            line.startsWith("-") -> ChangeKind.REMOVED
+            else -> ChangeKind.CONTEXT
+        },
+        text = line,
+    )
 
     private fun classify(line: String): Token {
         if (line.isBlank() || rule.matches(line)) return Token.Boundary
@@ -381,6 +436,12 @@ object TranscriptParser {
                         out += TranscriptEntry.Status(token.text, token.kind)
                     }
                     mergeStatus = true
+                }
+
+                is Token.Changes -> {
+                    flushAgent()
+                    out += TranscriptEntry.Changes(token.lines)
+                    mergeStatus = false
                 }
             }
         }

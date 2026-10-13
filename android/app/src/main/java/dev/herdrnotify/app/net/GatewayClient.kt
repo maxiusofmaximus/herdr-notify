@@ -151,6 +151,7 @@ class GatewayClient(
             // app's back, so retries are left off: a reconnect has to be visible
             // as a reconnect.
             .retryOnConnectionFailure(false)
+            .tailnetCleartextOnly()
             .build()
     }
 }

@@ -31,7 +31,7 @@ class AddressProberTest {
 
     private fun MockWebServer.healthy() = enqueue(MockResponse().setBody("""{"ok":true}"""))
 
-    private fun MockWebServer.url2() = url("/").toString().trimEnd('/')
+    private fun MockWebServer.url2() = "http://127.0.0.1:$port"
 
     @Test
     fun `earlier candidate wins even when a later one answers first`() = runBlocking {

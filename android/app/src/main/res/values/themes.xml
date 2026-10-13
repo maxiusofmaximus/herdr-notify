@@ -1,8 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!--
+        The window is dark first. The app draws edge-to-edge, so the status and
+        navigation icons must be the light variants on every API: a phone in light
+        mode would otherwise paint dark system icons over the dark ground and the
+        clock becomes unreadable.
+    -->
     <style name="Theme.HerdrNotify" parent="android:Theme.Material.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowBackground">@color/herdr_surface</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
     </style>
 </resources>

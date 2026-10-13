@@ -45,6 +45,10 @@ data class PairingUiState(
     val claimedDeviceId: String? = null,
     val claimedBaseUrl: String = "",
     val permissions: List<String> = emptyList(),
+    // -- tailnet peer picker (A6) ------------------------------------------
+    val peers: List<TailnetPeer> = emptyList(),
+    val peersLoading: Boolean = false,
+    val peersUnavailable: Boolean = false,
 ) {
     /**
      * The host command, ready to copy.
@@ -59,7 +63,12 @@ data class PairingUiState(
             "herdr-notify add-device --curve p256 --public-key $it --label ${deviceId.ifBlank { "phone" }}"
         }
 
-    val canSave: Boolean get() = publicKey != null && baseUrl.isNotBlank() && deviceId.isNotBlank()
+    val canSave: Boolean get() = publicKey != null && hasRoutableAddress && deviceId.isNotBlank()
+
+    val visibleBaseUrl: String get() = if (hasRoutableAddress) baseUrl else ""
+
+    val hasRoutableAddress: Boolean
+        get() = baseUrl.isNotBlank() && !Pairing.isLoopbackUrl(baseUrl)
 
     /**
      * Whether "Emparejar" can be pressed.
@@ -69,7 +78,7 @@ data class PairingUiState(
      * owner. Requiring a code here would hide the easiest path behind the hardest
      * one.
      */
-    val canClaim: Boolean get() = publicKey != null && baseUrl.isNotBlank() && !claiming
+    val canClaim: Boolean get() = publicKey != null && hasRoutableAddress && !claiming
 }
 
 /**
@@ -96,6 +105,11 @@ class PairingViewModel(
     // the manual (host-command) path working in a build that has no HTTP pairing.
     private val pair: suspend (String, PairRequest) -> Result<PairResponse> = { _, _ ->
         Result.failure(IllegalStateException("emparejamiento no configurado"))
+    },
+    // A6: the host's tailnet peers, offered as addresses. Fails closed when the
+    // list cannot be read, so the screen falls back to the manual field.
+    private val peers: suspend (String) -> Result<List<TailnetPeer>> = {
+        Result.failure(PeersUnavailable())
     },
     // The recovery code, held encrypted. A no-op store by default so the flow is
     // still complete without the Android keystore.
@@ -145,11 +159,46 @@ class PairingViewModel(
                     hasStoredRecoveryCode = storedRecovery != null,
                 )
             }
+            loadPeers()
         }
     }
 
     fun onBaseUrl(value: String) {
         _state.update { it.copy(baseUrl = value, saved = false) }
+    }
+
+    fun onRefreshPeers() {
+        loadPeers()
+    }
+
+    fun loadPeers() {
+        val current = _state.value
+        if (!current.hasRoutableAddress || current.peersLoading) return
+        _state.update { it.copy(peersLoading = true) }
+        scope.launch {
+            peers(Pairing.normaliseUrl(current.baseUrl))
+                .onSuccess { list ->
+                    _state.update {
+                        it.copy(peersLoading = false, peers = list, peersUnavailable = list.isEmpty())
+                    }
+                }
+                .onFailure {
+                    _state.update { it.copy(peersLoading = false, peersUnavailable = true) }
+                }
+        }
+    }
+
+    fun onPickPeer(peer: TailnetPeer) {
+        val address = peer.addresses.firstOrNull()?.takeIf { it.isNotBlank() } ?: return
+        _state.update {
+            it.copy(baseUrl = "http://$address:${gatewayPort(it.baseUrl)}", saved = false)
+        }
+    }
+
+    private fun gatewayPort(url: String): String {
+        val afterScheme = url.substringAfter("://", url)
+        val port = afterScheme.substringAfter(':', "").takeWhile { it.isDigit() }
+        return port.ifBlank { DEFAULT_GATEWAY_PORT }
     }
 
     fun onDeviceId(value: String) {
@@ -330,6 +379,8 @@ class PairingViewModel(
 
         /** The curve this app generates: P-256, the keystore's well-supported one. */
         const val CURVE = "p256"
+
+        const val DEFAULT_GATEWAY_PORT = "8788"
     }
 }
 

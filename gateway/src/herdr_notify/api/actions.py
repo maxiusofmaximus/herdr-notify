@@ -15,8 +15,6 @@ herdr call with a fixed parameter shape, and the variable parts are constrained:
 * **Ctrl-C is guarded.** It interrupts whatever an agent is doing, so the caller
   must also send ``confirm: true``. The app renders that as a confirmation
   dialog, which is the honest representation of what the button does.
-* **Prompt text is length-capped.** A prompt is unbounded by nature; an
-  accidental paste of a megabyte is not a legitimate action.
 * **Targets are resolved to a known pane.** herdr accepts a live agent name or a
   pane id, and resolves either. Restricting the target to a pane id the gateway
   already mirrors removes the possibility of addressing an agent that has since
@@ -61,10 +59,6 @@ GUARDED_KEYS: Final[frozenset[str]] = frozenset({"ctrl+c"})
 #: vocabulary is every key it can decode, which is far wider than what a phone
 #: has any business sending.
 ALLOWED_KEYS: Final = SAFE_KEYS | GUARDED_KEYS
-
-#: Cap on a submitted prompt. Long enough for a real instruction, short enough
-#: that a runaway paste is obviously wrong.
-MAX_PROMPT_CHARS: Final = 4000
 
 #: Cap on a pane read. The app renders a snippet, not a terminal buffer.
 MAX_READ_LINES: Final = 200
@@ -135,15 +129,10 @@ def validate_keys(keys: list[str], *, confirm: bool = False) -> list[str]:
 
 
 def validate_prompt(text: str) -> str:
-    """Length- and content-check a submitted prompt."""
+    """Content-check a submitted prompt."""
     cleaned = (text or "").strip()
     if not cleaned:
         raise ActionError("empty_prompt", "text is required")
-    if len(cleaned) > MAX_PROMPT_CHARS:
-        raise ActionError(
-            "prompt_too_long",
-            f"prompt is {len(cleaned)} characters, limit is {MAX_PROMPT_CHARS}",
-        )
     # A control character here would be typed into the agent's TTY as something
     # other than text. Newlines are legitimate (multi-line instructions), so
     # only the characters that actually break a terminal line are refused.
@@ -227,7 +216,6 @@ __all__ = [
     "ALLOWED_KEYS",
     "DEFAULT_READ_LINES",
     "GUARDED_KEYS",
-    "MAX_PROMPT_CHARS",
     "MAX_READ_LINES",
     "PANE_ID_RE",
     "READ_FALLBACK_SOURCE",

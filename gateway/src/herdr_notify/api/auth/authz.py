@@ -28,7 +28,7 @@ from .devices import Device, Permission
 #: them is not validated here — actions.py owns that — because the matrix
 #: classifies the endpoint, not the target: a malformed pane id is an action
 #: error (400), never an authorization one.
-_ACTION_PATH_RE: Final = re.compile(r"^/v1/agents/[^/]+/(respond|keys|focus|seen|read)$")
+_ACTION_PATH_RE: Final = re.compile(r"^/v1/agents/[^/]+/(respond|keys|focus|seen|read|image)$")
 
 #: Device management: ``POST /v1/devices/{device_id}/revoke``. The id is a
 #: single path segment and is not validated here (the handler answers 404 for an
@@ -47,6 +47,7 @@ _ACTION_PERMISSION: Final = {
     "focus": Permission.RESPOND,
     "seen": Permission.READ_STATE,
     "read": Permission.READ_STATE,
+    "image": Permission.RESPOND,
 }
 
 

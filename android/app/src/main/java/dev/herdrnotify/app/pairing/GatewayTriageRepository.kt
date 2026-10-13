@@ -245,9 +245,8 @@ class GatewayTriageRepository(
         call { it.state() }
     }
 
-    override suspend fun newChat(name: String) {
-        call { it.newChat(name) }
-    }
+    override suspend fun newChat(name: String): Result<String?> =
+        request { it.newChat(name) }.mapCatching { Wire.newChatPaneId(it) }
 
     /**
      * Run one action and discard its outcome, for the actions that are answers

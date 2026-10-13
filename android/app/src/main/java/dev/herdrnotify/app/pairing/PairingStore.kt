@@ -55,6 +55,16 @@ data class Pairing(
                 "https://$trimmed"
             }
         }
+
+        /**
+         * Whether an address points at the device itself.
+         *
+         * A build with no gatewayUrl defaults to loopback, which on a phone is
+         * the phone itself: pairing against it can only fail, and showing it
+         * filled hides that nothing has been entered.
+         */
+        fun isLoopbackUrl(url: String): Boolean =
+            url.contains("://127.0.0.1") || url.contains("://localhost")
     }
 }
 
@@ -106,8 +116,7 @@ class PairingStore(private val context: Context) {
         _state.value = Pairing(baseUrl = baseUrl, deviceId = deviceId)
     }
 
-    private fun isLoopback(url: String): Boolean =
-        url.contains("://127.0.0.1") || url.contains("://localhost")
+    private fun isLoopback(url: String): Boolean = Pairing.isLoopbackUrl(url)
 
     /** The current value without suspending. */
     fun current(): Pairing = _state.value

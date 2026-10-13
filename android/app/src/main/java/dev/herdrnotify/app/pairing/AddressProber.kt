@@ -1,5 +1,6 @@
 package dev.herdrnotify.app.pairing
 
+import dev.herdrnotify.app.net.tailnetCleartextOnly
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -86,6 +87,7 @@ class AddressProber(
             .connectTimeout(DEFAULT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .readTimeout(DEFAULT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .callTimeout(DEFAULT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .tailnetCleartextOnly()
             .build()
     }
 }

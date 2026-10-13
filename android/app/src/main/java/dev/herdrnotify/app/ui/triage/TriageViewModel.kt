@@ -5,6 +5,9 @@ import dev.herdrnotify.app.DebugLog
 import dev.herdrnotify.app.domain.AgentSummary
 import dev.herdrnotify.app.domain.ConnectionState
 import dev.herdrnotify.app.net.GatewayClient
+import dev.herdrnotify.app.ui.ImageAttachment
+import dev.herdrnotify.app.ui.imageFailureMessage
+import dev.herdrnotify.app.ui.imageProblemMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
@@ -44,6 +47,17 @@ class TriageViewModel(
 
     /** The open agent's detail, or null while the list is showing. */
     val detail: StateFlow<AgentDetail?> = _detail.asStateFlow()
+
+    private val _newChat = MutableStateFlow(NewChatState())
+
+    /**
+     * The "Nueva conversación" screen's own state.
+     *
+     * Whether the screen is open lives here rather than in the composition, so
+     * the two cannot drift: a successful create closes the screen and opens the
+     * chat in one update, and closing the chat does not resurrect the form.
+     */
+    val newChat: StateFlow<NewChatState> = _newChat.asStateFlow()
 
     /** The output poll for the open agent. Cancelled when the detail closes. */
     private var pollJob: Job? = null
@@ -100,6 +114,28 @@ class TriageViewModel(
     }
 
     /**
+     * Hold a picked image until the message is sent.
+     *
+     * Validated here rather than in the composer so the rule lives in one place
+     * and is testable; an image the gateway cannot take is reported immediately
+     * instead of at the moment of sending.
+     */
+    fun onAttachImage(bytes: ByteArray, mime: String) {
+        val problem = ImageAttachment.problem(mime, bytes.size)
+        _detail.update {
+            if (problem == null) {
+                it?.copy(attachment = PendingImage(bytes, mime), notice = null)
+            } else {
+                it?.copy(notice = imageProblemMessage(problem))
+            }
+        }
+    }
+
+    fun onClearAttachment() {
+        _detail.update { it?.copy(attachment = null) }
+    }
+
+    /**
      * Send the draft. An agent that is not waiting for an answer gets a question
      * first: a message sent to a working agent lands in the middle of its work,
      * which is rarely what the person meant, so the confirmation is the default
@@ -110,10 +146,6 @@ class TriageViewModel(
         val text = current.draft.trim()
         if (current.sending) return
         if (text.isEmpty()) return
-        if (text.length > MAX_MESSAGE_CHARS) {
-            _detail.update { it?.copy(notice = "El mensaje no puede pasar de $MAX_MESSAGE_CHARS caracteres.") }
-            return
-        }
         if (state.value.agentById(current.paneId)?.needsYou != true) {
             _detail.update { it?.copy(confirmRequired = true) }
             return
@@ -166,12 +198,33 @@ class TriageViewModel(
     }
 
     private fun send(paneId: String, text: String) {
+        val attachment = _detail.value?.attachment
         _detail.update { if (it?.paneId == paneId) it.copy(sending = true, notice = null) else it }
         scope.launch {
+            // The image goes first: a caption without its picture is more
+            // confusing than a picture without its caption, and if the image is
+            // refused nothing is sent and the person keeps their text.
+            if (attachment != null) {
+                val image = repository.sendImage(paneId, attachment.bytes, attachment.mime)
+                if (image.isFailure) {
+                    _detail.update {
+                        if (it?.paneId == paneId) {
+                            it.copy(sending = false, notice = imageFailureMessage(image.exceptionOrNull()))
+                        } else {
+                            it
+                        }
+                    }
+                    return@launch
+                }
+            }
             repository.respond(paneId, text)
                 .onSuccess {
                     _detail.update {
-                        if (it?.paneId == paneId) it.copy(draft = "", sending = false) else it
+                        if (it?.paneId == paneId) {
+                            it.copy(draft = "", sending = false, attachment = null)
+                        } else {
+                            it
+                        }
                     }
                     // Read straight away, so the reply to what was just sent
                     // appears without waiting for the next poll tick.
@@ -219,8 +272,54 @@ class TriageViewModel(
             }
     }
 
+    /** Open the "Nueva conversación" form. */
+    fun onOpenNewChat() {
+        _newChat.value = NewChatState(open = true)
+    }
+
+    /** Leave the form without creating anything. */
+    fun onCloseNewChat() {
+        _newChat.value = NewChatState()
+    }
+
+    /**
+     * Create a fresh conversation and, on success, open it.
+     *
+     * The host answers with the pane the new opencode agent lives in, so the
+     * person lands directly in that conversation. A host that created the
+     * workspace but named no pane is a distinct failure: the conversation may
+     * exist, but there is nothing to open, so the screen says so instead of
+     * pretending it worked.
+     */
     fun onNewChat(name: String) {
-        scope.launch { repository.newChat(name) }
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) {
+            _newChat.value = NewChatState(open = true, error = "Escribe un nombre para la conversación.")
+            return
+        }
+        if (_newChat.value.creating) return
+        _newChat.value = NewChatState(open = true, creating = true)
+        scope.launch {
+            repository.newChat(trimmed)
+                .onSuccess { paneId ->
+                    if (paneId.isNullOrBlank()) {
+                        _newChat.value = NewChatState(
+                            open = true,
+                            error = "El equipo creó la conversación pero no devolvió el panel.",
+                        )
+                    } else {
+                        _newChat.value = NewChatState()
+                        onOpenAgent(paneId)
+                    }
+                }
+                .onFailure { error ->
+                    _newChat.value = NewChatState(open = true, error = newChatFailure(error))
+                }
+        }
+    }
+
+    fun onDismissNewChatError() {
+        _newChat.update { it.copy(error = null) }
     }
 
     fun onDismissError() {
@@ -246,9 +345,6 @@ class TriageViewModel(
 
         /** The tail of the pane that the detail shows. */
         const val OUTPUT_LINES = 60
-
-        /** The gateway's limit on a message, from the respond route. */
-        const val MAX_MESSAGE_CHARS = 4_000
     }
 }
 
@@ -267,7 +363,32 @@ data class AgentDetail(
     val sending: Boolean = false,
     val notice: String? = null,
     val confirmRequired: Boolean = false,
+    val attachment: PendingImage? = null,
 )
+
+/** An image chosen for the next message, held in memory until it is sent. */
+data class PendingImage(val bytes: ByteArray, val mime: String)
+
+/**
+ * The "Nueva conversación" screen: whether it is showing, whether a create is in
+ * flight, and the last failure to explain.
+ */
+data class NewChatState(
+    val open: Boolean = false,
+    val creating: Boolean = false,
+    val error: String? = null,
+)
+
+/** What a failed conversation create means to the person. */
+internal fun newChatFailure(error: Throwable): String = when {
+    error is GatewayClient.GatewayError.NotPermitted ->
+        "Este teléfono no tiene permiso para crear conversaciones"
+
+    error is GatewayClient.GatewayError.Rejected && error.code == 409 ->
+        "El equipo no pudo arrancar la conversación en este momento."
+
+    else -> "No se pudo crear la conversación. Inténtalo de nuevo."
+}
 
 /** What a failed send means to the person, from the typed error. */
 internal fun sendFailure(error: Throwable): String = when {

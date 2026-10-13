@@ -87,3 +87,26 @@ haya una decisión explícita de exponerlo.
 
 Ver [[herdr-notify-architecture]] para por qué el gateway escucha solo en loopback
 y qué superficie queda expuesta cuando se añade `tailscale serve`.
+
+## Cuando el síntoma es el gateway, no `tailscale status`
+
+El servicio supervisado (`tooling/run-gateway-supervised.ps1`, gestionado con
+`tooling/herdr-notify-service.ps1`) resuelve la dirección tailnet en cada arranque
+con `tailscale ip -4` y enlaza `127.0.0.1` más esa dirección. Si el 401 de arriba
+impide esa consulta, la dirección queda vacía y el gateway arranca **solo en
+loopback**: el teléfono deja de alcanzarlo aunque el proceso siga vivo.
+
+Cómo verlo:
+
+```powershell
+herdr-notify status                        # tailscale: unavailable => solo loopback
+tooling\herdr-notify-service.ps1 status    # estado de la tarea y del puerto
+```
+
+El arreglo es el mismo de arriba (elevar, terminar el `tailscale-ipn` obsoleto,
+`Restart-Service Tailscale`); el gateway recoge la dirección en su siguiente
+reinicio:
+
+```powershell
+tooling\herdr-notify-service.ps1 restart
+```

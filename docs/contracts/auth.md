@@ -111,7 +111,7 @@ the default below.
 | Permission | id | Default at pairing | Meaning |
 |------------|----|--------------------|---------|
 | `READ_STATE` | `read_state` | **granted** | Observe: `/v1/state`, `/v1/events` (SSE), `/v1/peers`, pane output reads, mark an agent seen |
-| `RESPOND` | `respond` | not granted | Act: submit a prompt, focus a pane |
+| `RESPOND` | `respond` | not granted | Act: submit a prompt, focus a pane, attach an image to a pane |
 | `SEND_KEY` | `send_key` | not granted | Act: send allowlisted keys |
 | `APPROVE` | `approve` | not granted | **RESERVED in v1** — no endpoint maps to it; dialog answering is done through `respond`/`keys` |
 | `ADMIN` | `admin` | not granted | Manage devices: `GET /v1/devices`, `POST /v1/devices/{id}/revoke` (activated in Fase 2(c)) |
@@ -127,7 +127,8 @@ sits behind `READ_STATE` (decision 2026-10-09): marking an agent seen is
 non-destructive and reversible, and `RESPOND` stays reserved for approving,
 denying and sending. `read` (pane output) sits behind `READ_STATE` because it
 mutates nothing, and the write-budget rate limit already prices the herdr round
-trip it costs.
+trip it costs. `image` sits behind `RESPOND` because it submits a prompt (with
+the picture's path) to the agent.
 
 `/v1/me/fcm-token` requires no permission: it is self-service on the caller's
 own device record. The device id comes from the signature, never from the body,
@@ -154,6 +155,7 @@ endpoint cannot start life implicitly authorized.
 | `POST` | `/v1/agents/{pane_id}/focus` | `401` | `403` | `200` |
 | `POST` | `/v1/agents/{pane_id}/seen` | `401` | `200` | `200` |
 | `POST` | `/v1/agents/{pane_id}/read` | `401` | `200` | `200` |
+| `POST` | `/v1/agents/{pane_id}/image` | `401` | `403` | `200` |
 | `POST` | `/v1/me/fcm-token` | `401` | `200` | `200` |
 | any | endpoint with no rule | `401`/`404` | `403` | `403` |
 
@@ -256,5 +258,5 @@ reservation is not mistaken for a working surface.
 
 **Pairing wire flow.** IMPLEMENTED in Fase 2(c): `POST /v1/pair` consumes a
 host-printed single-use code, a per-device recovery code, or the tailnet-owner
-auto-approval (`tailscale whois`). See [`pairing.md`](pairing.md) and the
-Android-facing contract in `FASE2C.md`.
+auto-approval (`tailscale whois`). See [`pairing.md`](pairing.md) and
+[`api.md`](api.md).

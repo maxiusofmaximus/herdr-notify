@@ -11,8 +11,10 @@ import dev.herdrnotify.app.pairing.EncryptedRecoveryCodeStore
 import dev.herdrnotify.app.pairing.GatewayAddress
 import dev.herdrnotify.app.pairing.GatewayTriageRepository
 import dev.herdrnotify.app.pairing.PairingStore
+import dev.herdrnotify.app.pairing.PeersDirectory
 import dev.herdrnotify.app.pairing.RecoveryCodeStore
 import dev.herdrnotify.app.pairing.SignedDeviceDirectory
+import dev.herdrnotify.app.pairing.SignedPeersDirectory
 import dev.herdrnotify.app.push.NotificationChannels
 import dev.herdrnotify.app.push.TokenRelay
 import dev.herdrnotify.app.security.DeviceKeyStore
@@ -83,16 +85,19 @@ class AppContainer(context: Context) {
     /** "Mis dispositivos", over the signed client. */
     val devices: DeviceDirectory = SignedDeviceDirectory { signedClient() }
 
+    /** The host's tailnet peer list, for the pairing screen's address picker. */
+    val peers: PeersDirectory = SignedPeersDirectory { url -> signedClient(url) }
+
     /**
      * A signed client for the current pairing, built fresh each time so a
      * re-pair (a new `device_id`) is signed as the new identity, and null while
      * there is nothing to sign with.
      */
-    private fun signedClient(): GatewayClient? {
+    private fun signedClient(baseUrl: String? = null): GatewayClient? {
         val current = pairingStore.current()
         if (!current.isComplete || !keys.hasKey()) return null
         return GatewayClient(
-            baseUrl = current.baseUrl,
+            baseUrl = baseUrl ?: current.baseUrl,
             deviceId = current.deviceId,
             signer = RequestSigner(keys),
         )

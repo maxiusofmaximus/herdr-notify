@@ -48,6 +48,8 @@ class ChatPreviewActivity : ComponentActivity() {
                     onConfirmSend = {},
                     onDismissConfirm = {},
                     onPermissionKeys = { _, _ -> },
+                    onAttachImage = { _, _ -> },
+                    onClearAttachment = {},
                 )
             }
         }

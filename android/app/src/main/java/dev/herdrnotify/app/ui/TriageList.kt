@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,18 +19,31 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -43,6 +57,9 @@ import dev.herdrnotify.app.domain.AgentSummary
 import dev.herdrnotify.app.domain.SessionState
 import dev.herdrnotify.app.ui.theme.LocalStatusColors
 import dev.herdrnotify.app.ui.theme.Spacing
+import dev.herdrnotify.app.ui.triage.ProjectGroup
+import dev.herdrnotify.app.ui.triage.filterAgents
+import dev.herdrnotify.app.ui.triage.groupByProject
 
 /**
  * The triage list: the screen the phone opens when it buzzes.
@@ -67,71 +84,179 @@ fun TriageList(
     state: SessionState,
     onOpen: (AgentSummary) -> Unit,
     modifier: Modifier = Modifier,
-    onNewChat: (String) -> Unit = {},
+    onNewChat: () -> Unit = {},
 ) {
     if (state.isEmpty) {
         EmptyTriage(modifier = modifier, onNewChat = onNewChat)
         return
     }
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            start = Spacing.lg,
-            end = Spacing.lg,
-            top = Spacing.sm,
-            bottom = Spacing.xxl,
+    var query by rememberSaveable { mutableStateOf("") }
+    val collapsed = rememberSaveable(
+        saver = listSaver(
+            save = { it.toList() },
+            restore = { it.toMutableStateList() },
         ),
-        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-    ) {
-        item {
-            NewChatRow(onNewChat = onNewChat)
-        }
-        items(state.agents, key = { it.paneId }) { agent ->
-            TriageRow(agent = agent, onClick = { onOpen(agent) })
+    ) { mutableStateListOf<String>() }
+    val filtered = remember(state.agents, query) { filterAgents(state.agents, query) }
+    val groups = remember(filtered) { groupByProject(filtered) }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        SearchRow(
+            query = query,
+            onQuery = { query = it },
+            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+        )
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(
+                start = Spacing.lg,
+                end = Spacing.lg,
+                bottom = Spacing.xxl,
+            ),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            item {
+                NewChatRow(onNewChat = onNewChat)
+            }
+            if (groups.isEmpty()) {
+                item {
+                    NoMatches(query = query)
+                }
+            } else {
+                groups.forEach { group ->
+                    val open = group.project !in collapsed
+                    item(key = "header:${group.project}") {
+                        ProjectHeader(
+                            group = group,
+                            open = open,
+                            onToggle = {
+                                if (open) collapsed.add(group.project) else collapsed.remove(group.project)
+                            },
+                        )
+                    }
+                    if (open) {
+                        items(group.agents, key = { it.paneId }) { agent ->
+                            TriageRow(agent = agent, onClick = { onOpen(agent) })
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun NewChatRow(onNewChat: (String) -> Unit) {
-    var show by remember { mutableStateOf(false) }
-    var name by remember { mutableStateOf("") }
+private fun NewChatRow(onNewChat: () -> Unit) {
+    androidx.compose.material3.TextButton(
+        onClick = onNewChat,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        androidx.compose.material3.Text("+ Nueva conversación")
+    }
+}
 
-    if (show) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { show = false },
-            title = { androidx.compose.material3.Text("Nueva conversación") },
-            text = {
-                androidx.compose.material3.OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { androidx.compose.material3.Text("Nombre") },
-                    singleLine = true,
-                )
-            },
-            confirmButton = {
-                androidx.compose.material3.TextButton(
-                    onClick = {
-                        val trimmed = name.trim()
-                        if (trimmed.isNotEmpty()) {
-                            onNewChat(trimmed)
-                            name = ""
-                            show = false
-                        }
-                    },
-                ) { androidx.compose.material3.Text("Crear") }
-            },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { show = false }) {
-                    androidx.compose.material3.Text("Cancelar")
+@Composable
+private fun SearchRow(query: String, onQuery: (String) -> Unit, modifier: Modifier = Modifier) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQuery,
+        modifier = modifier.fillMaxWidth(),
+        singleLine = true,
+        placeholder = { Text("Buscar conversaciones…") },
+        leadingIcon = {
+            Icon(
+                imageVector = Icons.Filled.Search,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onQuery("") }) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Borrar la búsqueda",
+                    )
                 }
+            }
+        },
+    )
+}
+
+@Composable
+private fun ProjectHeader(group: ProjectGroup, open: Boolean, onToggle: () -> Unit) {
+    val statusColors = LocalStatusColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .clickable(onClick = onToggle)
+            .padding(vertical = Spacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.ExpandMore,
+            contentDescription = if (open) "Contraer ${group.project}" else "Expandir ${group.project}",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .size(20.dp)
+                .rotate(if (open) 0f else -90f),
+        )
+        Spacer(Modifier.width(Spacing.xs))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = group.project,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            group.latest?.let { latest ->
+                Text(
+                    text = listOfNotNull(
+                        statusLabel(latest.status),
+                        latest.title?.takeIf { it.isNotBlank() } ?: latest.agent.takeIf { it.isNotBlank() },
+                    ).joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = statusColors.label(latest.status),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(Modifier.width(Spacing.sm))
+        Text(
+            text = if (group.waiting > 0) "${group.waiting}/${group.count}" else group.count.toString(),
+            style = MaterialTheme.typography.labelMedium,
+            color = if (group.waiting > 0) {
+                statusColors.label(AgentStatus.BLOCKED)
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
             },
         )
     }
+}
 
-    androidx.compose.material3.TextButton(onClick = { show = true }) {
-        androidx.compose.material3.Text("+ Nueva conversación")
+@Composable
+private fun NoMatches(query: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(Spacing.xl),
+        contentAlignment = Alignment.Center,
+    ) {
+        StateBlock(
+            icon = {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            title = "Sin coincidencias",
+            body = "Ninguna conversación coincide con «$query».",
+        )
     }
 }
 
@@ -221,7 +346,7 @@ private fun TriageRow(agent: AgentSummary, onClick: () -> Unit) {
             Text(
                 text = statusLabel(agent.status),
                 style = MaterialTheme.typography.labelSmall,
-                color = accent,
+                color = statusColors.label(agent.status),
                 maxLines = 1,
             )
         }
@@ -229,53 +354,21 @@ private fun TriageRow(agent: AgentSummary, onClick: () -> Unit) {
 }
 
 @Composable
-private fun StatusDot(status: AgentStatus, accent: androidx.compose.ui.graphics.Color, pulsing: Boolean) {
-    val size = if (pulsing) 12.dp else 8.dp
-    Box(
-        modifier = Modifier
-            .size(if (pulsing) 22.dp else 18.dp)
-            .clip(CircleShape)
-            .background(accent.copy(alpha = if (pulsing) 0.16f else 0.10f))
-            .clearAndSetSemantics { },
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(size)
-                .clip(CircleShape)
-                .background(accent),
-        )
-    }
-}
-
-@Composable
-private fun EmptyTriage(modifier: Modifier = Modifier, onNewChat: (String) -> Unit = {}) {
+private fun EmptyTriage(modifier: Modifier = Modifier, onNewChat: () -> Unit = {}) {
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
+        StateBlock(
+            icon = {
+                Icon(
+                    imageVector = Icons.Filled.Bolt,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            title = stringResource(R.string.triage_empty_title),
+            body = stringResource(R.string.triage_empty_body),
             modifier = Modifier.padding(Spacing.xl),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-            )
-            Spacer(Modifier.height(Spacing.lg))
-            Text(
-                text = stringResource(R.string.triage_empty_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.height(Spacing.sm))
-            Text(
-                text = stringResource(R.string.triage_empty_body),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(Spacing.lg))
-            NewChatRow(onNewChat = onNewChat)
-        }
+            action = { NewChatRow(onNewChat = onNewChat) },
+        )
     }
 }
 

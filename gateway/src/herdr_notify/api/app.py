@@ -59,6 +59,12 @@ from .auth import (
     VerifiedRequest,
     authorize,
 )
+from .images import (
+    MAX_IMAGE_BODY_BYTES,
+    ImageError,
+    image_prompt,
+    store_image,
+)
 from .ratelimit import RateLimiter, StreamRegistry
 
 log = logging.getLogger(__name__)
@@ -86,10 +92,16 @@ class ApiConfig(BaseModel):
     port: int = 8787
 
     max_read_lines: int = 200
+    image_store_dir: Path = Path.home() / ".config" / "herdr-notify" / "images"
 
 
 class RespondRequest(BaseModel):
-    text: str = Field(min_length=1, max_length=4000)
+    text: str = Field(min_length=1)
+
+
+class ImageRequest(BaseModel):
+    mime: str = Field(min_length=1, max_length=64)
+    data: str = Field(min_length=1)
 
 
 class KeysRequest(BaseModel):
@@ -153,6 +165,17 @@ async def _capture_body(request: Request, limit: int = MAX_ENROLL_BODY) -> bytes
     return body
 
 
+def _signed_body_limit(path: str) -> int:
+    """The signed-body cap for an endpoint.
+
+    The image route carries an encoded picture and needs a larger ceiling than
+    the 256 KiB every other signed request is held to.
+    """
+    if path.startswith("/v1/agents/") and path.endswith("/image"):
+        return MAX_IMAGE_BODY_BYTES
+    return MAX_SIGNED_BODY
+
+
 def _parse_signed_body[ModelT: BaseModel](request: Request, model: type[ModelT]) -> ModelT:
     """Validate the body model against the bytes that were signed.
 
@@ -197,6 +220,30 @@ def _is_host_owner(ip: str) -> bool:
         return False
     who = tailnet_whois(ip)
     return who is not None and who.owner_id == view.self_peer.owner_id
+
+
+def _empty_code_detail(ip: str) -> dict[str, str]:
+    """Why a code-less pairing was refused, and the path that works.
+
+    The caller already knows it sent no code, so saying so leaks nothing: with
+    no code there is only the owner check, and it failed. The message stays
+    about the caller's own request and never reports a tailnet owner, address or
+    hostname. A loopback source is called out because the common cause is the
+    local ``tailscale serve`` proxy, which makes every request look local.
+    """
+    if ip in {"127.0.0.1", "::1"}:
+        message = (
+            "no pairing code was provided and this request arrived from a local "
+            "address, so it cannot be matched to the host's tailnet owner (a "
+            "local proxy makes every request look local); run `herdr-notify "
+            "enroll` on the host and enter the code"
+        )
+    else:
+        message = (
+            "no pairing code was provided and this address is not the host's "
+            "tailnet owner; run `herdr-notify enroll` on the host and enter the code"
+        )
+    return {"code": "pairing_rejected", "message": message}
 
 
 def create_app(
@@ -264,7 +311,8 @@ def create_app(
             "X-HN-Nonce": x_hn_nonce,
             "X-HN-Signature": x_hn_signature,
         }
-        body = await _capture_body(request, limit=MAX_SIGNED_BODY)
+        body_limit = _signed_body_limit(request.url.path)
+        body = await _capture_body(request, limit=body_limit)
         # The trust store can be rewritten by a host-side CLI while this server
         # runs, so pick that up before deciding whether the device is known.
         ctx.devices.reload_if_changed()
@@ -277,6 +325,7 @@ def create_app(
             target=target,
             body=body,
             headers=headers,
+            max_body_bytes=body_limit,
         )
         # Authorization is a separate question from authentication: the
         # signature says who the caller is, not what it may do. Checked after
@@ -403,7 +452,7 @@ def create_app(
         # No code: the same tailnet owner is the proof. Anything else is refused
         # uniformly, so an address cannot be probed for whose account owns it.
         if not _is_host_owner(ip):
-            raise HTTPException(status_code=403, detail="pairing_rejected")
+            raise HTTPException(status_code=403, detail=_empty_code_detail(ip))
         device = ctx.devices.add_device(
             curve=payload.curve,
             public_key=payload.public_key,
@@ -571,6 +620,39 @@ def create_app(
         return {
             "text": read.get("text", ""),
             "pane_id": read.get("pane_id", pane_id),
+        }
+
+    @app.post("/v1/agents/{pane_id}/image")
+    async def send_image(
+        pane_id: str, request: Request, verified: VerifiedRequest = Depends(require_device)
+    ) -> dict[str, Any]:
+        """Accept an image for an agent and hand it the file path.
+
+        The picture is written under the gateway's own data dir and the agent is
+        sent a prompt naming the absolute path, so the agent opens it with the
+        tools it already has. The file is removed again if herdr refuses the
+        prompt, so a rejected attachment leaves nothing behind.
+        """
+        require_write(verified)
+        payload = _parse_signed_body(request, ImageRequest)
+        target = act_or_400(validate_pane_id, pane_id)
+        try:
+            stored = store_image(settings.image_store_dir, target, payload.mime, payload.data)
+        except ImageError as exc:
+            raise HTTPException(
+                status_code=400, detail={"code": exc.code, "message": exc.message}
+            ) from exc
+        try:
+            result = await perform(act_or_400(build_respond, target, image_prompt(stored.path)))
+        except HTTPException:
+            with contextlib.suppress(OSError):
+                stored.path.unlink()
+            raise
+        return {
+            "ok": True,
+            "pane_id": target,
+            "path": str(stored.path),
+            "result": _summarise(result),
         }
 
     # -- new conversation ----------------------------------------------------
