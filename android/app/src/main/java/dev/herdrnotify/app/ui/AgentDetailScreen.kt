@@ -1,0 +1,637 @@
+package dev.herdrnotify.app.ui
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import dev.herdrnotify.app.domain.AgentSummary
+import dev.herdrnotify.app.ui.theme.LocalStatusColors
+import dev.herdrnotify.app.ui.theme.Spacing
+import dev.herdrnotify.app.ui.triage.AgentDetail
+import dev.herdrnotify.app.ui.triage.TriageViewModel
+
+/**
+ * One agent: what it is doing, its recent turns, and a box to answer it.
+ *
+ * The pane comes back as a rendered terminal screen, so the view is split in
+ * two. **Conversación** is the cleaned reading: the person's prompts and the
+ * agent's replies as separate bubbles, with Claude Code's chrome folded into
+ * quiet status rows (see [TranscriptParser]). **Salida cruda** is the untouched
+ * tail, one tap away, so nothing the parser misreads is ever really lost.
+ *
+ * The box is always there, because the common reason to open an agent is to
+ * answer it: the input and Send button ride above the keyboard and the
+ * navigation bar through the bottom inset, and the system back gesture returns
+ * to the list.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AgentDetailScreen(
+    agent: AgentSummary?,
+    detail: AgentDetail,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit,
+    onDraftChange: (String) -> Unit,
+    onSend: () -> Unit,
+    onConfirmSend: () -> Unit,
+    onDismissConfirm: () -> Unit,
+    onPermissionKeys: (List<String>, Boolean) -> Unit,
+) {
+    // The system back gesture closes the detail, rather than leaving the app.
+    BackHandler(onBack = onBack)
+
+    if (detail.confirmRequired) {
+        AlertDialog(
+            onDismissRequest = onDismissConfirm,
+            text = {
+                Text("Este agente no está esperando una respuesta. ¿Enviar de todos modos?")
+            },
+            confirmButton = {
+                TextButton(onClick = onConfirmSend) { Text("Enviar") }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissConfirm) { Text("Cancelar") }
+            },
+        )
+    }
+
+    // "Permitir siempre" widens access for good, so it is asked twice: the button
+    // is the first tap, this dialog is the second. The option is held here rather
+    // than in the card so a re-read of the tail cannot move the question the
+    // person is about to answer.
+    var pendingAlways by remember { mutableStateOf<PermissionOption?>(null) }
+    pendingAlways?.let { option ->
+        AlertDialog(
+            onDismissRequest = { pendingAlways = null },
+            title = { Text("¿Permitir siempre?") },
+            text = {
+                Text(
+                    "Se concederá el permiso sin volver a preguntar en esta sesión. " +
+                        "Podrás revocarlo en el host, pero no desde aquí.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingAlways = null
+                        onPermissionKeys(option.keys, true)
+                    },
+                ) { Text("Permitir siempre") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingAlways = null }) { Text("Cancelar") }
+            },
+        )
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { ChatHeaderTitle(agent = agent, paneId = detail.paneId) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Volver a la lista",
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onRefresh) {
+                        Icon(
+                            imageVector = Icons.Filled.Refresh,
+                            contentDescription = "Leer de nuevo",
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                ),
+            )
+        },
+        bottomBar = {
+            Composer(
+                detail = detail,
+                onDraftChange = onDraftChange,
+                onSend = onSend,
+            )
+        },
+    ) { insets ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(insets)
+                .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+        ) {
+            detail.outputError?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Spacer(Modifier.height(Spacing.sm))
+            }
+
+            var rawMode by rememberSaveable { mutableStateOf(false) }
+            ModeToggle(
+                raw = rawMode,
+                onChange = { rawMode = it },
+                enabled = !detail.output.isNullOrBlank(),
+            )
+            Spacer(Modifier.height(Spacing.sm))
+
+            val output = detail.output
+            when {
+                output == null -> Placeholder("Cargando la salida…")
+                output.isBlank() -> Placeholder("Sin salida reciente")
+                rawMode -> RawOutput(output = output, modifier = Modifier.weight(1f))
+                else -> Transcript(
+                    entries = remember(output) { TranscriptParser.parse(output) },
+                    onPermissionOption = { option ->
+                        if (option.confirm) {
+                            pendingAlways = option
+                        } else {
+                            onPermissionKeys(option.keys, false)
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Project on top, the agent's state and task underneath, carried by a coloured
+ * dot whose colour is herdr's own status meaning — the same signal the list and
+ * the terminal use, so the two never disagree about what "blocked" looks like.
+ */
+@Composable
+private fun ChatHeaderTitle(agent: AgentSummary?, paneId: String) {
+    Column {
+        Text(
+            text = agent?.project ?: paneId,
+            style = MaterialTheme.typography.titleLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (agent != null) {
+            val accent = LocalStatusColors.current.forStatus(agent.status)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(accent),
+                )
+                Spacer(Modifier.width(Spacing.xs + 2.dp))
+                Text(
+                    text = statusLabel(agent.status),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = accent,
+                    maxLines = 1,
+                )
+                val title = agent.title?.takeIf { it.isNotBlank() }
+                if (title != null) {
+                    Text(
+                        text = " · $title",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The reading is the default; the raw tail is one tap away. A segmented pair
+ * rather than a hidden gesture, because "the phone rewrote this" is exactly the
+ * moment a developer wants to check the source, and it should be obvious.
+ */
+@Composable
+private fun ModeToggle(raw: Boolean, onChange: (Boolean) -> Unit, enabled: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Segment(
+            label = "Conversación",
+            selected = !raw,
+            enabled = enabled,
+            onClick = { onChange(false) },
+        )
+        Spacer(Modifier.width(Spacing.sm))
+        Segment(
+            label = "Salida cruda",
+            selected = raw,
+            enabled = enabled,
+            onClick = { onChange(true) },
+        )
+    }
+}
+
+@Composable
+private fun Segment(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val container = when {
+        selected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+    }
+    val content = when {
+        selected -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(50),
+        color = container,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (enabled) content else content.copy(alpha = 0.4f),
+            modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs + 2.dp),
+        )
+    }
+}
+
+@Composable
+private fun Placeholder(text: String) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * The cleaned conversation: the person's turns on the right, the agent's on the
+ * left, status rows in the middle. It follows the newest turn the way a chat
+ * does, because the question brought to this screen is almost always "what did
+ * it just say"; scrolling up to read history still works until the next read.
+ */
+@Composable
+private fun Transcript(
+    entries: List<TranscriptEntry>,
+    onPermissionOption: (PermissionOption) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scroll = rememberScrollState()
+    LaunchedEffect(entries) { scroll.scrollTo(scroll.maxValue) }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .verticalScroll(scroll),
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+    ) {
+        entries.forEach { entry ->
+            when (entry) {
+                is TranscriptEntry.User -> Bubble(text = entry.text, fromUser = true)
+                is TranscriptEntry.Agent -> Bubble(text = entry.text, fromUser = false)
+                is TranscriptEntry.Status -> StatusRow(entry)
+                is TranscriptEntry.Permission -> PermissionCard(entry.prompt, onPermissionOption)
+            }
+        }
+    }
+}
+
+/**
+ * A blocking permission dialog, drawn as its own card of buttons.
+ *
+ * This is the one piece of the pane the phone exists to answer: the agent is
+ * stopped until a choice is made, and the person is away from the PC. The
+ * buttons carry the parsed keystrokes, so tapping one is the same as reaching
+ * over and pressing the key. "Permitir siempre" is routed back through the
+ * screen's confirmation dialog rather than sent from here.
+ */
+@Composable
+private fun PermissionCard(prompt: PermissionPrompt, onOption: (PermissionOption) -> Unit) {
+    val accent = LocalStatusColors.current.blocked
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(Spacing.md)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(accent),
+                )
+                Spacer(Modifier.width(Spacing.sm))
+                Text(
+                    text = prompt.title,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = accent,
+                )
+            }
+            prompt.detail?.let { detail ->
+                Spacer(Modifier.height(Spacing.xs))
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            Spacer(Modifier.height(Spacing.sm))
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                prompt.options.forEachIndexed { index, option ->
+                    if (index == 0) {
+                        Button(
+                            onClick = { onOption(option) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(option.label) }
+                    } else {
+                        OutlinedButton(
+                            onClick = { onOption(option) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(option.label) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Bubble(text: String, fromUser: Boolean) {
+    val bubbleColor = if (fromUser) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+    // The agent's turn is terminal output and stays monospaced so column-shaped
+    // text survives; the person's own words are prose and read better in the
+    // normal face, which is also what makes "mine vs. its" legible at a glance.
+    val textStyle = if (fromUser) {
+        MaterialTheme.typography.bodyMedium
+    } else {
+        MaterialTheme.typography.bodySmall.copy(
+            fontFamily = FontFamily.Monospace,
+            fontSize = 13.sp,
+            lineHeight = 19.sp,
+        )
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (fromUser) Arrangement.End else Arrangement.Start,
+    ) {
+        Surface(
+            color = bubbleColor,
+            shape = if (fromUser) {
+                RoundedCornerShape(18.dp, 18.dp, 18.dp, 6.dp)
+            } else {
+                RoundedCornerShape(18.dp, 18.dp, 6.dp, 18.dp)
+            },
+            modifier = Modifier.widthIn(max = 330.dp),
+        ) {
+            Text(
+                text = text,
+                style = textStyle,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm + 2.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatusRow(status: TranscriptEntry.Status) {
+    when (status.kind) {
+        StatusKind.RECAP -> RecapBlock(text = status.text)
+        else -> {
+            val colors = LocalStatusColors.current
+            val accent = if (status.kind == StatusKind.PROGRESS) colors.working else colors.idle
+            CenteredStatus(text = status.text, accent = accent)
+        }
+    }
+}
+
+/** Progress and chrome: a small centred chip, quiet enough to skim past. */
+@Composable
+private fun CenteredStatus(text: String, accent: Color) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+            shape = RoundedCornerShape(50),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(accent),
+                )
+                Spacer(Modifier.width(Spacing.sm))
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 300.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A `recap:` block is a real summary, so it gets a labelled, left-anchored card
+ * instead of a chip: it is the one piece of chrome worth reading, and a summary
+ * dressed as noise would be skipped.
+ */
+@Composable
+private fun RecapBlock(text: String) {
+    val accent = LocalStatusColors.current.done
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .height(IntrinsicSize.Min)
+                .padding(Spacing.md),
+        ) {
+            Box(
+                Modifier
+                    .width(3.dp)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(accent),
+            )
+            Spacer(Modifier.width(Spacing.md))
+            Column {
+                Text(
+                    text = "Resumen",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = accent,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The pane exactly as the terminal drew it, for the moments the cleaned view is
+ * not trusted. Monospaced, follows the tail, and never reformatted.
+ */
+@Composable
+private fun RawOutput(output: String, modifier: Modifier = Modifier) {
+    val scroll = rememberScrollState()
+    LaunchedEffect(output) { scroll.scrollTo(scroll.maxValue) }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(Spacing.md)
+            .verticalScroll(scroll),
+    ) {
+        Text(
+            text = output,
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp,
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * The answer box. Disabled while a send is in flight, so a double tap cannot
+ * send the same text twice.
+ *
+ * The edge-to-edge window draws behind the navigation bar, so the box must
+ * leave room for it: `imePadding` alone lifts the box only for the keyboard and
+ * lets the navigation bar cover it when the keyboard is down. The bottom inset
+ * is the union — the larger of the keyboard and the navigation bar — not their
+ * sum, because with the keyboard up the navigation bar sits under it and adding
+ * both would leave a stray gap above the keyboard.
+ */
+@Composable
+private fun Composer(
+    detail: AgentDetail,
+    onDraftChange: (String) -> Unit,
+    onSend: () -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(
+                WindowInsets.ime.union(WindowInsets.navigationBars).only(WindowInsetsSides.Bottom),
+            )
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+    ) {
+        detail.notice?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Spacer(Modifier.height(Spacing.xs))
+        }
+        Row(verticalAlignment = Alignment.Bottom) {
+            OutlinedTextField(
+                value = detail.draft,
+                onValueChange = { if (it.length <= TriageViewModel.MAX_MESSAGE_CHARS) onDraftChange(it) },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Escribe una respuesta…") },
+                maxLines = 4,
+                enabled = !detail.sending,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { onSend() }),
+            )
+            Spacer(Modifier.width(Spacing.sm))
+            Button(
+                onClick = onSend,
+                enabled = detail.draft.isNotBlank() && !detail.sending,
+            ) {
+                Text("Enviar")
+            }
+        }
+    }
+}

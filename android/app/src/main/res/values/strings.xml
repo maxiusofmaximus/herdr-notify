@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">herdr notify</string>
+
+    <!-- Triage -->
+    <string name="triage_title">Agentes</string>
+    <string name="triage_subtitle_none">Nada en marcha</string>
+    <string name="triage_empty_title">Ningún agente en marcha</string>
+    <string name="triage_empty_body">Arranca un agente en herdr y aparecerá aquí en cuanto lo detecte.</string>
+    <string name="triage_filter_all">Todo</string>
+    <string name="triage_filter_needs_you">Te esperan</string>
+    <string name="triage_filter_active">Trabajando</string>
+
+    <!-- States. Every one of these is a designed state, not a default. -->
+    <string name="state_connecting">Conectando con el equipo…</string>
+    <string name="state_offline_title">Sin conexión con el equipo</string>
+    <string name="state_offline_body">Mostrando la última información conocida. Volvemos solos en cuanto vuelva la red.</string>
+    <string name="state_unauthorized_title">Este teléfono no está emparejado</string>
+    <string name="state_unauthorized_body">Vuelve a emparejar para que el equipo vuelva a aceptarlo.</string>
+    <string name="state_error_body">No se pudo hablar con el gateway. Se seguirá reintentando con pausas crecientes.</string>
+    <string name="state_error_title">Algo ha fallado</string>
+    <string name="state_no_data_title">Sin conexión con el equipo</string>
+    <string name="state_no_data_body">Todavía no hemos recibido nada de este equipo. Comprueba que Tailscale está activo en el teléfono y en el PC, y que el gateway está en marcha.</string>
+    <string name="action_retry">Reintentar</string>
+    <string name="action_settings">Ajustes</string>
+    <string name="action_open">Abrir</string>
+    <string name="action_mark_seen">Marcar visto</string>
+    <string name="action_respond">Responder</string>
+    <string name="action_focus">Enfocar</string>
+    <string name="action_stop_agent">Detener agente</string>
+    <string name="action_stop_confirm_title">¿Detener el agente?</string>
+    <string name="action_stop_confirm_body">Se interrumpirá lo que esté haciendo ahora. No se puede deshacer.</string>
+    <string name="action_cancel">Cancelar</string>
+    <string name="action_confirm">Confirmar</string>
+
+    <!-- Status labels, matching herdr's own vocabulary. -->
+    <string name="status_blocked">Necesita tu atención</string>
+    <string name="status_working">Trabajando</string>
+    <string name="status_done">Terminó</string>
+    <string name="status_idle">Listo</string>
+    <string name="status_unknown">Sin clasificar</string>
+
+    <!-- Pairing -->
+    <string name="pairing_title">Emparejar este teléfono</string>
+    <string name="pairing_body">En el equipo, ejecuta <b>herdr-notify add-device</b> y pega la clave pública que aparece en pantalla.</string>
+    <string name="pairing_host_label">Equipo</string>
+    <string name="pairing_public_key_label">Clave pública de este teléfono</string>
+    <string name="pairing_fingerprint_label">Huella</string>
+    <string name="pairing_copy_key">Copiar clave</string>
+    <string name="pairing_copied">Clave copiada</string>
+    <string name="pairing_regenerate">Generar otra clave</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Ajustes</string>
+    <string name="settings_notifications">Notificaciones</string>
+    <string name="settings_notify_blocked">Te esperan</string>
+    <string name="settings_notify_done">Terminados</string>
+    <string name="settings_quiet_hours">Horario silencioso</string>
+    <string name="settings_security">Seguridad</string>
+    <string name="settings_biometric">Pedir huella para actuar</string>
+    <string name="settings_biometric_body">Te la pedirá al responder o detener un agente.</string>
+    <string name="settings_connection">Conexión</string>
+    <string name="settings_host">Dirección del equipo</string>
+    <string name="settings_disconnect">Desemparejar</string>
+    <string name="settings_about">Acerca de</string>
+    <string name="settings_version">Versión</string>
+
+    <!-- Detail -->
+    <string name="detail_project">Proyecto</string>
+    <string name="detail_task">Tarea</string>
+    <string name="detail_agent">Agente</string>
+    <string name="detail_directory">Directorio</string>
+    <string name="detail_output">Última salida</string>
+    <string name="detail_reply_hint">Responde al agente…</string>
+    <string name="detail_reply_send">Enviar</string>
+    <string name="detail_no_output">Sin salida reciente</string>
+
+    <!-- Notification channels. The names are what a user sees in system settings,
+         so they say what the channel is for rather than what it is called. -->
+    <string name="channel_blocked_name">Agentes que te esperan</string>
+    <string name="channel_blocked_description">Avisos cuando un agente necesita una respuesta tuya.</string>
+    <string name="channel_done_name">Agentes terminados</string>
+    <string name="channel_done_description">Avisos cuando un agente termina una tarea, sin interrumpir.</string>
+
+    <string name="notification_permission_rationale">Sin permiso de avisos, no podemos scandirte cuando un agente se queda esperando. El equipo sigue funcionando igual.</string>
+    <string name="notification_permission_allow">Permitir avisos</string>
+</resources>

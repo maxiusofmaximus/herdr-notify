@@ -1,0 +1,447 @@
+package dev.herdrnotify.app
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
+import dev.herdrnotify.app.push.HerdrMessagingService
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.herdrnotify.app.domain.ConnectionState
+import dev.herdrnotify.app.pairing.AddressProber
+import dev.herdrnotify.app.pairing.PairingScreen
+import dev.herdrnotify.app.pairing.PairingViewModel
+import dev.herdrnotify.app.pairing.DevicesViewModel
+import dev.herdrnotify.app.recovery.NoConnectionScreen
+import dev.herdrnotify.app.recovery.RecoveryViewModel
+import dev.herdrnotify.app.recovery.openTailscale
+import dev.herdrnotify.app.ui.AgentDetailScreen
+import dev.herdrnotify.app.ui.DevicesScreen
+import dev.herdrnotify.app.ui.GatewayDialog
+import dev.herdrnotify.app.ui.TriageList
+import dev.herdrnotify.app.ui.theme.HerdrNotifyTheme
+import dev.herdrnotify.app.ui.theme.Spacing
+import dev.herdrnotify.app.ui.triage.TriageViewModel
+import dev.herdrnotify.app.ui.triage.agentById
+import dev.herdrnotify.app.ui.triage.rememberNowMillis
+import dev.herdrnotify.app.ui.triage.subtitle
+
+/**
+ * One activity, two screens.
+ *
+ * Not navigation: a phone that is not paired has nothing to navigate to, and the
+ * only way out of pairing is to finish pairing. A nav graph would add a back
+ * stack whose every entry is invalid.
+ */
+class MainActivity : ComponentActivity() {
+
+    private val container: AppContainer
+        get() = (application as HerdrNotifyApplication).container
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
+        super.onCreate(savedInstanceState)
+        setContent {
+            HerdrNotifyTheme {
+                App(container)
+            }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        container.repository.connect()
+        openAgentFromIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openAgentFromIntent(intent)
+    }
+
+    /**
+     * A tapped notification carries the pane that raised it. The extra comes
+     * from a push payload, so it is validated against the pane id shape before
+     * it is used, and consumed so a recreation does not repeat the action. FCM
+     * puts every data field in the extras itself when it displays the
+     * notification for a backgrounded app, so the same key serves both paths.
+     */
+    private fun openAgentFromIntent(intent: Intent?) {
+        val paneId = intent?.getStringExtra(EXTRA_PANE_ID) ?: return
+        intent.removeExtra(EXTRA_PANE_ID)
+        if (!HerdrMessagingService.PANE_ID.matches(paneId)) return
+        DebugLog.d("opening agent from notification: $paneId")
+        container.applicationScope.launch { container.repository.markSeen(paneId) }
+    }
+
+    companion object {
+        const val EXTRA_PANE_ID = "pane_id"
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Closed on every stop, not only on destroy: a foreground connection
+        // held while the app is invisible is a battery cost with no benefit, and
+        // FCM covers the case where the app is not running at all.
+        container.repository.disconnect()
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun App(container: AppContainer) {
+    // The store's StateFlow, not a one-shot read.
+    //
+    // Reading the pairing once with `produceState` looks right — a suspend disk
+    // read with a "not known yet" value — but it only ever answers the question
+    // at startup. Saving a pairing would not re-trigger it, so the app would sit
+    // on the pairing screen forever with the values stored and nothing
+    // connecting. Collecting the flow is what makes "finish pairing" actually
+    // lead anywhere.
+    val pairing by container.pairingStore.state.collectAsStateWithLifecycle()
+
+    // Disk read once. `load` is idempotent, so a configuration change re-running
+    // it costs a redundant read and nothing else.
+    LaunchedEffect(Unit) { container.pairingStore.load() }
+
+    NotificationPermissionPrompt()
+
+    // Re-pairing is reachable from the guided "Sin conexión" screen even while
+    // the phone is still paired: it is the pairing that is broken, not the
+    // address, so clearing the pairing would be the wrong move.
+    var showPairing by rememberSaveable { mutableStateOf(false) }
+
+    if (pairing.isComplete && !showPairing) {
+        TriageApp(container, onRepair = { showPairing = true })
+    } else {
+        PairingRoute(
+            container,
+            // Only offer a way back when there is a paired state to return to.
+            onBack = if (pairing.isComplete) ({ showPairing = false }) else null,
+            onPaired = { showPairing = false },
+        )
+    }
+}
+
+@Composable
+private fun PairingRoute(
+    container: AppContainer,
+    onBack: (() -> Unit)? = null,
+    onPaired: (() -> Unit)? = null,
+) {
+    val factory = remember {
+        object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T =
+                PairingViewModel(
+                    keys = container.keys,
+                    store = container.pairingStore,
+                    probe = { AddressProber().firstHealthy(it) },
+                    // The one unauthenticated write: POST /v1/pair.
+                    pair = { url, request -> container.pairingApi.pair(url, request) },
+                    recoveryCodes = container.recoveryCodes,
+                ) as T
+        }
+    }
+    val viewModel: PairingViewModel = viewModel(factory = factory)
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    PairingScreen(
+        state = state,
+        onBaseUrl = viewModel::onBaseUrl,
+        onDeviceId = viewModel::onDeviceId,
+        onSave = { viewModel.save { } },
+        onResetKey = viewModel::resetKey,
+        onBack = onBack,
+        onCode = viewModel::onCode,
+        onClaim = viewModel::claim,
+        onRepairWithRecovery = viewModel::repairWithRecovery,
+        onCommit = { viewModel.commitClaim { onPaired?.invoke() } },
+        onDismissRecovery = viewModel::dismissRecovery,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TriageApp(container: AppContainer, onRepair: () -> Unit) {
+    val repository = container.repository
+    val factory = remember {
+        object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T =
+                TriageViewModel(repository) as T
+        }
+    }
+    val viewModel: TriageViewModel = viewModel(factory = factory)
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val detail by viewModel.detail.collectAsStateWithLifecycle()
+
+    // The guided reconnect screen's own state. Its dependencies are handed to it
+    // rather than looked up inside, so it stays a plain JVM-testable object: the
+    // prober and the two ways to reconnect are the only things that touch the
+    // network or the disk.
+    val recoveryFactory = remember {
+        object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T =
+                RecoveryViewModel(
+                    connection = repository.connection,
+                    host = { repository.host() },
+                    candidates = {
+                        listOf(
+                            container.pairingStore.current().baseUrl,
+                            BuildConfig.DEFAULT_GATEWAY_URL,
+                        )
+                    },
+                    probe = { AddressProber().firstHealthy(it) },
+                    onAddressFound = { url -> container.gatewayAddress.change(url) },
+                    reconnect = { repository.retry() },
+                ) as T
+        }
+    }
+    val recoveryViewModel: RecoveryViewModel = viewModel(factory = recoveryFactory)
+    val recoveryState by recoveryViewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    // Reconnect whenever the app comes to the foreground. `onStart` does this
+    // too, but a configuration change keeps the ViewModel and therefore keeps
+    // the repository, so the stream has to be re-established explicitly.
+    LaunchedEffect(Unit) { repository.connect() }
+
+    // The agent detail replaces the list rather than stacking on it. There is
+    // no navigation graph for two screens: the back gesture is handled inside
+    // the detail, and closing it returns to the list the ViewModel still holds.
+    detail?.let { open ->
+        AgentDetailScreen(
+            agent = state.agentById(open.paneId),
+            detail = open,
+            onBack = viewModel::onCloseAgent,
+            onRefresh = viewModel::onRefreshOutput,
+            onDraftChange = viewModel::onDraftChange,
+            onSend = viewModel::onSend,
+            onConfirmSend = viewModel::onConfirmSend,
+            onDismissConfirm = viewModel::onDismissConfirm,
+            onPermissionKeys = viewModel::onPermissionKeys,
+        )
+        return
+    }
+
+    val now = rememberNowMillis()
+    var showGateway by rememberSaveable { mutableStateOf(false) }
+    var gatewayError by rememberSaveable { mutableStateOf<String?>(null) }
+    var showDevices by rememberSaveable { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    // The device list replaces the triage list while open, like the agent detail:
+    // there is no nav graph, and closing returns to the list the ViewModel holds.
+    if (showDevices) {
+        val devicesFactory = remember {
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T =
+                    DevicesViewModel(
+                        directory = container.devices,
+                        selfId = { container.pairingStore.current().deviceId },
+                    ) as T
+            }
+        }
+        val devicesViewModel: DevicesViewModel = viewModel(factory = devicesFactory)
+        val devicesState by devicesViewModel.state.collectAsStateWithLifecycle()
+        DevicesScreen(
+            state = devicesState,
+            onBack = { showDevices = false },
+            onRevoke = devicesViewModel::revoke,
+        )
+        return
+    }
+
+    if (showGateway) {
+        GatewayDialog(
+            currentUrl = container.pairingStore.current().baseUrl,
+            error = gatewayError,
+            onSave = { url ->
+                scope.launch {
+                    container.gatewayAddress.change(url)
+                        .onSuccess {
+                            gatewayError = null
+                            showGateway = false
+                        }
+                        .onFailure { gatewayError = "Escribe la dirección del gateway." }
+                }
+            },
+            onDismiss = {
+                gatewayError = null
+                showGateway = false
+            },
+        )
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(
+                            text = stringResource(R.string.triage_title),
+                            style = MaterialTheme.typography.titleLarge,
+                        )
+                        state.subtitle(now)?.let { subtitle ->
+                            Text(
+                                text = subtitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                },
+                actions = {
+                    TextButton(onClick = { showDevices = true }) { Text("Dispositivos") }
+                    TextButton(onClick = { showGateway = true }) { Text("Gateway") }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                ),
+            )
+        },
+    ) { insets ->
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(insets),
+        ) {
+            when (val current = state) {
+                is ConnectionState.Unpaired -> Message(
+                    R.string.state_unauthorized_title,
+                    R.string.state_unauthorized_body,
+                )
+
+                is ConnectionState.Connecting -> Message(
+                    R.string.state_connecting,
+                    R.string.state_connecting,
+                )
+
+                is ConnectionState.Failed -> NoConnectionScreen(
+                    state = recoveryState,
+                    onActivateTailscale = { openTailscale(context) },
+                    onRetry = recoveryViewModel::retry,
+                    onRepair = onRepair,
+                )
+
+                is ConnectionState.Offline -> if (current.lastKnown.isEmpty) {
+                    NoConnectionScreen(
+                        state = recoveryState,
+                        onActivateTailscale = { openTailscale(context) },
+                        onRetry = recoveryViewModel::retry,
+                        onRepair = onRepair,
+                    )
+                } else {
+                    TriageList(
+                        state = current.lastKnown,
+                        onOpen = { viewModel.onOpenAgent(it.paneId) },
+                        onNewChat = viewModel::onNewChat,
+                    )
+                }
+
+                is ConnectionState.Live -> TriageList(
+                    state = current.state,
+                    onOpen = { viewModel.onOpenAgent(it.paneId) },
+                    onNewChat = viewModel::onNewChat,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun Message(titleRes: Int, bodyRes: Int, onChangeGateway: (() -> Unit)? = null) {
+    Column(Modifier.padding(Spacing.xl)) {
+        Text(
+            text = stringResource(titleRes),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = stringResource(bodyRes),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        // A failed connection is often the address, not the host: a Tailscale
+        // name that moved. Offering the change here is the fix for that case.
+        if (onChangeGateway != null) {
+            Spacer(Modifier.height(Spacing.lg))
+            TextButton(onClick = onChangeGateway) { Text("Cambiar gateway") }
+        }
+    }
+}
+
+/**
+ * Android 13+ shows nothing until the user grants POST_NOTIFICATIONS, and a push
+ * that is silently dropped looks exactly like a broken backend. Ask once per
+ * session, with a short reason first, and never nag after a refusal.
+ */
+@Composable
+private fun NotificationPermissionPrompt() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val granted = ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.POST_NOTIFICATIONS,
+    ) == PackageManager.PERMISSION_GRANTED
+    var asked by rememberSaveable { mutableStateOf(false) }
+    val launcher = rememberLauncherForNotificationPermission { asked = true }
+    if (granted || asked) return
+
+    AlertDialog(
+        onDismissRequest = { asked = true },
+        title = { Text("Avisos de agentes") },
+        text = { Text("Permite las notificaciones para enterarte cuando un agente espera tu respuesta.") },
+        confirmButton = {
+            TextButton(onClick = { launcher() }) { Text("Permitir") }
+        },
+        dismissButton = {
+            TextButton(onClick = { asked = true }) { Text("Ahora no") }
+        },
+    )
+}
+
+@Composable
+private fun rememberLauncherForNotificationPermission(onResult: () -> Unit): () -> Unit {
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { onResult() }
+    return { launcher.launch(Manifest.permission.POST_NOTIFICATIONS) }
+}

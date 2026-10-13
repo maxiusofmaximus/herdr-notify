@@ -1,0 +1,60 @@
+{
+  "_comment": "Golden vectors for the signed request string. Both the Kotlin implementation (RequestSigner.signingString) and the Python one (api.auth.canonical.build_signing_string) must produce exactly these bytes. Changing either side without regenerating here fails both test suites.",
+  "encoding": "utf-8",
+  "vectors": [
+    {
+      "name": "read-state",
+      "method": "GET",
+      "target": "/v1/state",
+      "body": "",
+      "timestamp": 1700000000,
+      "nonce": "AAAAAAAAAAAAAAAAAAAAAA==",
+      "expected": "GET\n/v1/state\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n1700000000\nAAAAAAAAAAAAAAAAAAAAAA==\n"
+    },
+    {
+      "name": "respond-unicode",
+      "method": "POST",
+      "target": "/v1/agents/w1:p1/respond",
+      "body": "{\"text\":\"sí, hazlo\"}",
+      "timestamp": 1700000000,
+      "nonce": "bm9uY2Utb25lLTEwMTExMTE=",
+      "expected": "POST\n/v1/agents/w1:p1/respond\nd913f8b269423ab2c2d9eac0910b8412e666587c57805bb21d191ca95d0a9e95\n1700000000\nbm9uY2Utb25lLTEwMTExMTE=\n"
+    },
+    {
+      "name": "keys-confirm",
+      "method": "POST",
+      "target": "/v1/agents/w1:p1/keys",
+      "body": "{\"keys\":[\"ctrl+c\"],\"confirm\":true}",
+      "timestamp": 1700000001,
+      "nonce": "bm9uY2UtdHdvLTIyMjIyMg==",
+      "expected": "POST\n/v1/agents/w1:p1/keys\n39480735c8df218fb7677375032b747407ae1cac54ef17281e095f75652a934a\n1700000001\nbm9uY2UtdHdvLTIyMjIyMg==\n"
+    },
+    {
+      "name": "read-pane",
+      "method": "POST",
+      "target": "/v1/agents/w9:p3/read",
+      "body": "{\"lines\":60}",
+      "timestamp": 1700000002,
+      "nonce": "bm9uY2UtdGhyZWUtMzMzMzM=",
+      "expected": "POST\n/v1/agents/w9:p3/read\n5c22ba7f2d675ccfcb49319c188a9fefdc1f212885a9ad40f194b2582e36af89\n1700000002\nbm9uY2UtdGhyZWUtMzMzMzM=\n"
+    },
+    {
+      "name": "mark-seen",
+      "method": "POST",
+      "target": "/v1/agents/wA:p1/seen",
+      "body": "",
+      "timestamp": 1700000003,
+      "nonce": "bm9uY2UtZm91ci00NDQ0NA==",
+      "expected": "POST\n/v1/agents/wA:p1/seen\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n1700000003\nbm9uY2UtZm91ci00NDQ0NA==\n"
+    },
+    {
+      "name": "empty-body-write",
+      "method": "POST",
+      "target": "/v1/me/fcm-token",
+      "body": "{\"fcm_token\":\"abc\"}",
+      "timestamp": 1700000004,
+      "nonce": "bm9uY2UtZml2ZS01NTU1NQ==",
+      "expected": "POST\n/v1/me/fcm-token\n70035b054fffde8719314707e9cbc07f4a950f9f26e996501565bb86648d94a8\n1700000004\nbm9uY2UtZml2ZS01NTU1NQ==\n"
+    }
+  ]
+}

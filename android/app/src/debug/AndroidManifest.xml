@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only manifest: an entry point that renders the agent chat with a fixed
+  tail, so the phone UI can be inspected without a live herdr agent behind the
+  gateway. Merged into the debug build only; never shipped.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name=".ChatPreviewActivity"
+            android:exported="true"
+            android:theme="@style/Theme.HerdrNotify" />
+    </application>
+</manifest>

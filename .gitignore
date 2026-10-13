@@ -1,0 +1,59 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Virtualenvs
+.venv/
+venv/
+
+# Secrets — the FCM service account and google-services.json must never be
+# committed. See docs/setup-firebase.md; .gitignore is the last line of defence,
+# not the first.
+service-account*.json
+google-services.json
+*.p12
+*.keystore
+*.jks
+!debug.keystore.example
+.firebase/
+firebase-debug.log
+
+# Release signing passwords. This file holds the keystore path and the store and
+# key passwords in plain text, so it is a secret in its own right — unlike a
+# keystore, which at least is a binary someone has to think about stealing.
+keystore.properties
+
+# The signing key itself. Matched by extension, not by directory: the file is
+# release.jks, and a rule for `*.keystore` does not cover it. That gap is how a
+# signing key ends up in a public repository one `git add .` after the day it is
+# generated. The directory is ignored as a backstop in case the extension
+# changes.
+keystores/
+
+# Local state
+*.log
+.env
+.env.*
+!.env.example
+
+# Android build output and machine-specific configuration
+android/local.properties
+android/.gradle/
+android/build/
+android/app/build/
+android/app/schemas/
+*.hprof
+
+# Tooling scratch
+/dist/
+/out/
+
+# Exported agent-session transcripts. They are working artefacts of a single
+# sitting, not project files, and a clean checkout should not carry one. The
+# governing v2 specification is replanteamiento.md, which is tracked on purpose.
+session-*.md
+*-session*.md

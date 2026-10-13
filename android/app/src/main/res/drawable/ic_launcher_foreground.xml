@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A glyph, not a logo. The mark is the status dot herdr already uses, sized up:
+    one amber dot over a dark field, readable at launcher size and unmistakable
+    next to the other icons on a home screen.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#0E1116"
+        android:pathData="M0,0h108v108h-108z" />
+
+    <!-- Attention dot -->
+    <path
+        android:fillColor="#FF6B6B"
+        android:pathData="M54,30m-13,0a13,13 0,1 1,26 0a13,13 0,1 1,-26 0" />
+
+    <!-- Terminal prompt: a bar and a caret, the thing the agents live behind -->
+    <path
+        android:fillColor="#4C8DFF"
+        android:pathData="M31,62h46v5h-46z" />
+    <path
+        android:fillColor="#4C8DFF"
+        android:pathData="M31,75h28v5h-28z" />
+    <path
+        android:fillColor="#3FB950"
+        android:pathData="M65,72l14,6l-14,6z" />
+</vector>

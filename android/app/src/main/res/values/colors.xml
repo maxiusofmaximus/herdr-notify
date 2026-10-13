@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        The app's surfaces are deliberately not the Material defaults. These are
+        the values the Compose theme reads, kept in one place so the XML theme
+        and the Compose theme cannot drift.
+    -->
+    <color name="herdr_surface">#FF0E1116</color>
+    <color name="herdr_surface_elevated">#FF161B22</color>
+    <color name="herdr_accent">#FF4C8DFF</color>
+    <color name="herdr_blocked">#FFFF6B6B</color>
+    <color name="herdr_working">#FF4C8DFF</color>
+    <color name="herdr_done">#FF3FB950</color>
+    <color name="herdr_idle">#FF6E7681</color>
+    <color name="herdr_unknown">#FF8B949E</color>
+</resources>

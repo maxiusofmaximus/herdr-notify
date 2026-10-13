@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Nothing about this app belongs in a backup or a device transfer.
+
+    There is no account and no server-side copy of anything, so a restored
+    backup would contain a device that no gateway trusts and no key it can
+    use. Refusing both the cloud backup and the device-to-device transfer is
+    the honest answer: a restored app must pair again.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+    </device-transfer>
+</data-extraction-rules>

@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Required from API 33 to show a notification. The runtime prompt is part of
+         first-run, not a one-off buried in settings. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- Held only while the live event stream is connected, so the OS can tell a
+         foreground service from a leaked one. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- The guided "Sin conexión" screen opens the Tailscale app by name. Under
+         API 30+ package visibility filtering that lookup returns null unless the
+         package is declared here, which would make the step a button that does
+         nothing. The store intent covers the app-not-installed case. -->
+    <queries>
+        <package android:name="com.tailscale.ipn" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="market" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".HerdrNotifyApplication"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:enableOnBackInvokedCallback="true"
+        android:theme="@style/Theme.HerdrNotify"
+        tools:targetApi="34">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.HerdrNotify">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- The gateway's notification message names this action as its click
+                 action; FCM then launches it with the data fields as extras. The
+                 only extra acted on is `pane_id`, validated against the pane id
+                 shape, and the action it drives (mark seen) needs only READ_STATE. -->
+            <intent-filter>
+                <action android:name="OPEN_AGENT" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!--
+            Every component below is exported=false. The app has exactly one
+            exported surface, MainActivity, and it declares no custom scheme; its one custom
+            action, OPEN_AGENT, only carries a validated pane id (see above).
+
+            FCM's service is exported by Google's own manifest and receives only
+            system broadcasts; the payload it hands us is treated as untrusted
+            and every field is validated before use.
+        -->
+        <service
+            android:name=".push.HerdrMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".sync.LiveStreamService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge" />
+
+    </application>
+
+</manifest>
