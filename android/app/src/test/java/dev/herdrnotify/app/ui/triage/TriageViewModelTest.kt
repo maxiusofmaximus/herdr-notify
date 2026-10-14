@@ -405,6 +405,23 @@ class TriageViewModelTest {
     }
 
     @Test
+    fun `a read error says whether retrying can help`() {
+        // The card only offers Retry when a retry can succeed: a closed pane and
+        // a permission refusal are final, a transient conflict is not.
+        val gone = readError(GatewayClient.GatewayError.Rejected(404, "agent target wQ:pG not found"))
+        assertFalse("a closed pane must not offer Retry", gone.retryable)
+
+        val forbidden = readError(GatewayClient.GatewayError.NotPermitted("forbidden"))
+        assertFalse("a 403 is final for this action", forbidden.retryable)
+
+        val working = readError(GatewayClient.GatewayError.Rejected(409, "working"))
+        assertTrue("a transient conflict is worth retrying", working.retryable)
+
+        val generic = readError(IllegalStateException("boom"))
+        assertTrue("an unknown read failure is worth retrying", generic.retryable)
+    }
+
+    @Test
     fun `a 404 on read says the agent is gone, not that reading failed`() {
         // The symptom this pins: a chat left open for a pane the operator
         // closed showed the red generic read failure and polled forever.
@@ -442,7 +459,7 @@ class TriageViewModelTest {
         vm.onOpenAgent("wQ:pG")
         runCurrent()
 
-        assertEquals("Este agente ya no existe", vm.detail.value?.outputError)
+        assertEquals("Este agente ya no existe", vm.detail.value?.outputError?.message)
         assertEquals("one read is all a gone pane gets", 1, repo.reads.size)
 
         advanceTimeBy(TriageViewModel.POLL_MILLIS * 5)

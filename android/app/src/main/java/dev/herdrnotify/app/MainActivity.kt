@@ -296,6 +296,7 @@ private fun TriageApp(container: AppContainer, onRepair: () -> Unit) {
             onStop = viewModel::onStopAgent,
             onConfirmStop = viewModel::onConfirmStop,
             onDismissStop = viewModel::onDismissStop,
+            onDismissNotice = viewModel::onDismissNotice,
             onAttachImage = viewModel::onAttachImage,
             onClearAttachment = viewModel::onClearAttachment,
         )
@@ -340,6 +341,7 @@ private fun TriageApp(container: AppContainer, onRepair: () -> Unit) {
             state = devicesState,
             onBack = { showDevices = false },
             onRevoke = devicesViewModel::revoke,
+            onReload = devicesViewModel::load,
         )
         return
     }

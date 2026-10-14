@@ -60,6 +60,7 @@ fun DevicesScreen(
     state: DevicesUiState,
     onBack: () -> Unit,
     onRevoke: (String) -> Unit,
+    onReload: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var pendingRevoke by remember { mutableStateOf<DeviceInfo?>(null) }
@@ -102,7 +103,11 @@ fun DevicesScreen(
                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
             }
 
-            state.error != null -> ErrorText(state.error)
+            state.error != null -> NoticeCard(
+                message = state.error,
+                title = "No se pudieron cargar los dispositivos",
+                actions = listOf(NoticeAction("Reintentar", onReload)),
+            )
 
             state.isEmpty -> StateBlock(
                 icon = {

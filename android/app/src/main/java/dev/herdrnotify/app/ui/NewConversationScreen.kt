@@ -100,14 +100,16 @@ fun NewConversationScreen(
             )
 
             state.error?.let { message ->
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
+                NoticeCard(
+                    message = message,
+                    title = "No se pudo crear la conversación",
+                    actions = buildList {
+                        if (name.isNotBlank() && !state.creating) {
+                            add(NoticeAction("Reintentar") { onCreate(name) })
+                        }
+                        add(NoticeAction("Descartar", onDismissError))
+                    },
                 )
-                androidx.compose.material3.TextButton(onClick = onDismissError) {
-                    Text("Descartar")
-                }
             }
 
             Button(

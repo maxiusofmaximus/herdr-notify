@@ -134,6 +134,11 @@ class TriageViewModel(
         _detail.update { it?.copy(attachment = null) }
     }
 
+    /** Dismiss the composer's notice without touching the draft. */
+    fun onDismissNotice() {
+        _detail.update { it?.copy(notice = null) }
+    }
+
     /**
      * Send the draft. An agent that is not waiting for an answer gets a question
      * first: a message sent to a working agent lands in the middle of its work,
@@ -319,7 +324,7 @@ class TriageViewModel(
             }
             .onFailure { error ->
                 _detail.update {
-                    if (it?.paneId == paneId) it.copy(outputError = readFailure(error)) else it
+                    if (it?.paneId == paneId) it.copy(outputError = readError(error)) else it
                 }
                 if (error.isAgentGone()) onAgentGone()
             }
@@ -419,7 +424,7 @@ class TriageViewModel(
 data class AgentDetail(
     val paneId: String,
     val output: String? = null,
-    val outputError: String? = null,
+    val outputError: ChatError? = null,
     val draft: String = "",
     val sending: Boolean = false,
     val notice: String? = null,
@@ -427,6 +432,16 @@ data class AgentDetail(
     val stopRequired: Boolean = false,
     val attachment: PendingImage? = null,
 )
+
+/**
+ * A read failure, with whether re-reading can help.
+ *
+ * [retryable] is what decides whether the error card offers a Retry button at
+ * all: offering one for a closed pane or a missing permission is offering a
+ * button that can never succeed, which reads as the app being broken rather
+ * than the situation being final.
+ */
+data class ChatError(val message: String, val retryable: Boolean)
 
 /** An image chosen for the next message, held in memory until it is sent. */
 data class PendingImage(val bytes: ByteArray, val mime: String)
@@ -496,6 +511,22 @@ internal fun readFailure(error: Throwable): String = when {
 
     else -> "No se pudo leer la salida del agente"
 }
+
+/**
+ * A failed read as the screen needs it: the message, and whether retrying can
+ * possibly help.
+ *
+ * A gone pane (404) and a missing permission (403) are both final — the fix is
+ * not another read — so their cards must not offer Retry.
+ */
+internal fun readError(error: Throwable): ChatError = ChatError(
+    message = readFailure(error),
+    retryable = when {
+        error.isAgentGone() -> false
+        error is GatewayClient.GatewayError.NotPermitted -> false
+        else -> true
+    },
+)
 
 /** What a failed answer to a permission dialog means to the person. */
 internal fun keyFailure(error: Throwable): String = when {

@@ -9,6 +9,7 @@ import dev.herdrnotify.app.domain.AgentSummary
 import dev.herdrnotify.app.ui.AgentDetailScreen
 import dev.herdrnotify.app.ui.theme.HerdrNotifyTheme
 import dev.herdrnotify.app.ui.triage.AgentDetail
+import dev.herdrnotify.app.ui.triage.ChatError
 
 /**
  * Debug-only: renders the agent chat against a fixed pane tail.
@@ -40,7 +41,16 @@ class ChatPreviewActivity : ComponentActivity() {
                         focused = false,
                         canResume = true,
                     ),
-                    detail = AgentDetail(paneId = "wQ:pM", output = SAMPLE_TAIL),
+                    detail = AgentDetail(
+                        paneId = "wQ:pM",
+                        output = SAMPLE_TAIL,
+                        outputError = ChatError(
+                            message = "El agente está trabajando; se leerá la salida en un momento",
+                            retryable = true,
+                        ),
+                        notice = "No se pudo enviar el mensaje. Inténtalo de nuevo.",
+                        draft = "reintento",
+                    ),
                     onBack = {},
                     onRefresh = {},
                     onDraftChange = {},
@@ -51,6 +61,7 @@ class ChatPreviewActivity : ComponentActivity() {
                     onStop = {},
                     onConfirmStop = {},
                     onDismissStop = {},
+                    onDismissNotice = {},
                     onAttachImage = { _, _ -> },
                     onClearAttachment = {},
                 )

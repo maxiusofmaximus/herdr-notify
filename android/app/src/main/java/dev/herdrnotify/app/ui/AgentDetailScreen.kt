@@ -114,6 +114,7 @@ fun AgentDetailScreen(
     onStop: () -> Unit,
     onConfirmStop: () -> Unit,
     onDismissStop: () -> Unit,
+    onDismissNotice: () -> Unit,
     onAttachImage: (ByteArray, String) -> Unit,
     onClearAttachment: () -> Unit,
 ) {
@@ -219,6 +220,7 @@ fun AgentDetailScreen(
                 onDraftChange = onDraftChange,
                 onSend = onSend,
                 onStop = onStop,
+                onDismissNotice = onDismissNotice,
                 onAttachImage = onAttachImage,
                 onClearAttachment = onClearAttachment,
             )
@@ -230,16 +232,22 @@ fun AgentDetailScreen(
                 .padding(insets)
                 .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
         ) {
-            detail.outputError?.let { message ->
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
+            var rawMode by rememberSaveable { mutableStateOf(false) }
+
+            detail.outputError?.let { problem ->
+                NoticeCard(
+                    message = problem.message,
+                    title = "No se pudo leer el agente",
+                    actions = buildList {
+                        if (problem.retryable) add(NoticeAction("Reintentar", onRefresh))
+                        if (!detail.output.isNullOrBlank()) {
+                            add(NoticeAction("Ver salida cruda") { rawMode = true })
+                        }
+                    },
                 )
                 Spacer(Modifier.height(Spacing.sm))
             }
 
-            var rawMode by rememberSaveable { mutableStateOf(false) }
             ModeToggle(
                 raw = rawMode,
                 onChange = { rawMode = it },
@@ -650,6 +658,7 @@ private fun Composer(
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
+    onDismissNotice: () -> Unit,
     onAttachImage: (ByteArray, String) -> Unit,
     onClearAttachment: () -> Unit,
 ) {
@@ -674,10 +683,17 @@ private fun Composer(
             .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
     ) {
         detail.notice?.let { message ->
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
+            NoticeCard(
+                message = message,
+                title = "No se pudo completar la acción",
+                actions = buildList {
+                    // A preserved draft is what makes Retry meaningful: the text
+                    // is still here, so sending it again is one tap.
+                    if (detail.draft.isNotBlank() && !detail.sending) {
+                        add(NoticeAction("Reintentar", onSend))
+                    }
+                    add(NoticeAction("Descartar", onDismissNotice))
+                },
             )
             Spacer(Modifier.height(Spacing.xs))
         }
