@@ -26,11 +26,13 @@ import dev.herdrnotify.app.push.NotificationPermissionStep
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material3.CircularProgressIndicator
@@ -52,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -65,11 +68,14 @@ import dev.herdrnotify.app.recovery.NoConnectionScreen
 import dev.herdrnotify.app.recovery.RecoveryViewModel
 import dev.herdrnotify.app.recovery.openTailscale
 import dev.herdrnotify.app.ui.AgentDetailScreen
+import dev.herdrnotify.app.ui.ConnectionDialog
+import dev.herdrnotify.app.ui.ConnectionPill
 import dev.herdrnotify.app.ui.DevicesScreen
 import dev.herdrnotify.app.ui.GatewayDialog
 import dev.herdrnotify.app.ui.NewConversationScreen
 import dev.herdrnotify.app.ui.StateBlock
 import dev.herdrnotify.app.ui.TriageList
+import dev.herdrnotify.app.ui.connectionIndicator
 import dev.herdrnotify.app.ui.theme.HerdrNotifyTheme
 import dev.herdrnotify.app.ui.theme.Spacing
 import dev.herdrnotify.app.ui.triage.TriageViewModel
@@ -321,6 +327,7 @@ private fun TriageApp(container: AppContainer, onRepair: () -> Unit) {
     var showGateway by rememberSaveable { mutableStateOf(false) }
     var gatewayError by rememberSaveable { mutableStateOf<String?>(null) }
     var showDevices by rememberSaveable { mutableStateOf(false) }
+    var showConnection by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // The device list replaces the triage list while open, like the agent detail:
@@ -368,6 +375,27 @@ private fun TriageApp(container: AppContainer, onRepair: () -> Unit) {
         )
     }
 
+    if (showConnection) {
+        ConnectionDialog(
+            indicator = connectionIndicator(state),
+            detail = state.subtitle(),
+            host = repository.host(),
+            onRetry = {
+                showConnection = false
+                recoveryViewModel.retry()
+            },
+            onChangeGateway = {
+                showConnection = false
+                showGateway = true
+            },
+            onRepair = {
+                showConnection = false
+                onRepair()
+            },
+            onDismiss = { showConnection = false },
+        )
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -378,17 +406,30 @@ private fun TriageApp(container: AppContainer, onRepair: () -> Unit) {
                     // whole one recompose on every tick — the triage list
                     // included — for a subtitle that changes once a minute.
                     val now = rememberNowMillis()
+                    val indicator = connectionIndicator(state)
                     Column {
                         Text(
                             text = stringResource(R.string.triage_title),
                             style = MaterialTheme.typography.titleLarge,
                         )
-                        state.subtitle(now)?.let { subtitle ->
-                            Text(
-                                text = subtitle,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // The connection is always visible here, whatever the
+                            // body shows, and tapping it opens the fixes.
+                            ConnectionPill(
+                                light = indicator.light,
+                                text = indicator.label,
+                                onClick = { showConnection = true },
                             )
+                            state.subtitle(now)?.let { subtitle ->
+                                Spacer(Modifier.width(Spacing.sm))
+                                Text(
+                                    text = subtitle,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                 },
