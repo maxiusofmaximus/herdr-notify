@@ -67,7 +67,43 @@ uv pip install --python .venv/Scripts/python.exe -e ".[dev]"
 # What does herdr look like right now?
 .venv/Scripts/python.exe -m herdr_notify.cli dump
 PYTHONPATH=src .venv/Scripts/python.exe -m herdr_notify.cli dump --follow
+
+# Pair a phone: mint a single-use code and print it as a QR to scan.
+.venv/Scripts/python.exe -m herdr_notify.cli enroll --qr --url https://pc.tailnet.ts.net
 ```
+
+## Pairing a phone
+
+A device is paired with a **single-use enrollment code** the operator mints on
+the host and the phone enters once. `enroll --qr` prints that code together with
+a QR the phone scans, so the base URL and the code travel in one step:
+
+```
+$ herdr-notify enroll --qr --url https://pc.tailnet.ts.net
+pairing code : THMDRVA
+valid for    : 600s
+trust store  : ~/.config/herdr-notify/devices.json
+
+On the phone, enter this code once to register its public key.
+
+scan this QR, or open the URI below:
+████████████████ ... ████████████████
+...
+pairing uri  : herdr-notify://pair?u=https%3A%2F%2Fpc.tailnet.ts.net&c=THMDRVA&v=1
+```
+
+The payload is `herdr-notify://pair?u=<base URL>&c=<code>&v=1`: the gateway's
+base URL percent-encoded, the enrollment code, and the version. The code keeps
+its existing **600 s TTL and single use** — the QR is a shorter way to type the
+same code, not a second enrollment path.
+
+The base URL for `--qr` comes from, in order: `--url`,
+`HERDR_NOTIFY_PUBLIC_URL`, a `"public_url"` key in
+`~/.config/herdr-notify/gateway.json`, and finally the host's own tailnet
+address (`http://<tailnet-ip>:8787`). If none of those answers, `enroll --qr`
+refuses with guidance and mints no code. Without `--qr`, `enroll` prints the
+code exactly as before.
+
 
 ## Testing
 

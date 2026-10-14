@@ -2,6 +2,7 @@
 
 Authoritative code: `gateway/src/herdr_notify/api/auth/devices.py`,
 `gateway/src/herdr_notify/cli.py` (`add-device`, `enroll`, `devices`),
+`gateway/src/herdr_notify/pairing.py` (payload and QR),
 `android/.../security/DeviceKeyStore.kt`, `android/.../pairing/`.
 
 ## Device identity — IMPLEMENTED
@@ -104,6 +105,33 @@ host and enters once on the phone.
 The host-side `add-device` CLI remains the manual path to the same result, and
 is still the way to grant anything beyond the `READ_STATE` pairing default.
 
+## QR payload — IMPLEMENTED
+
+`herdr-notify enroll --qr` prints the pairing code and a QR the phone scans, so
+the base URL and the code are entered in one step. The payload is a fixed text
+URI (`gateway/src/herdr_notify/pairing.py` is authoritative):
+
+```
+herdr-notify://pair?u=<base URL>&c=<enrollment code>&v=1
+```
+
+- `u` — the gateway's public base URL, percent-encoded as one query value.
+- `c` — the single-use enrollment code from `enroll`.
+- `v` — the payload version, `1`.
+
+The code inside the payload is the **same** enrollment code, with the same
+600 s TTL and single use (`DeviceStore.issue_enrollment_code`). The QR carries
+no secret beyond the code and opens no new path into the gateway; `POST /v1/pair`
+resolves it exactly as it resolves a code typed by hand. The builder refuses a
+base URL without a scheme or host, and an empty code.
+
+The base URL for `--qr` is resolved from, in order: `--url`,
+`HERDR_NOTIFY_PUBLIC_URL`, a `"public_url"` string in
+`~/.config/herdr-notify/gateway.json`, then the host's own tailnet address
+(`http://<tailnet-ip>:8787`). A malformed explicit or configured URL is an
+error, not a silent fall-through. When no source answers, `enroll --qr` exits
+`2` with guidance and mints no code. Without `--qr`, `enroll` is unchanged.
+
 ## Trust store — IMPLEMENTED
 
 - Path: `~/.config/herdr-notify/devices.json` (override with `--devices`).
@@ -192,6 +220,7 @@ Since Fase 2(c), an `ADMIN`-granted device can also do this over HTTP:
 | Host-side `add-device` CLI pairing | IMPLEMENTED |
 | `POST /v1/pair` (code / recovery / tailnet owner) | IMPLEMENTED (Fase 2(c)) |
 | Pairing codes (4 bytes, 600 s, single use) | IMPLEMENTED |
+| QR pairing payload (`enroll --qr`, `herdr-notify://pair`) | IMPLEMENTED |
 | Recovery codes (re-key, rotate, SHA-256 hash only) | IMPLEMENTED |
 | Tailnet auto-approval (`tailscale whois`, same owner) | IMPLEMENTED |
 | Trust store (atomic writes, fail closed, live reload) | IMPLEMENTED |
