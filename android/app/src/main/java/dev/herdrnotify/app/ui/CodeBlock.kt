@@ -23,10 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.herdrnotify.app.ui.theme.LocalStatusColors
@@ -43,10 +40,10 @@ private val NumberAmber = Color(0xFFD29922)
  *
  * It gets its own surface with a border, a language label and a copy button —
  * the three things that turn a wall of monospace into something a person can
- * read and reuse. A **Crudo / Resaltado** toggle sits beside the copy button:
- * highlighting is a guess about the language, and the moment it guesses wrong
- * the person needs the exact bytes back, which is what raw shows (and what the
- * copy button always copies, highlighted or not).
+ * read and reuse. A raw/rendered toggle sits beside the copy button, labelled
+ * with the *action* it performs ("Ver crudo" while highlighted, "Ver resaltado"
+ * while raw): labelling the current state made a highlighted block that looked
+ * plain read as a bug, when it was only the raw view.
  */
 @Composable
 fun CodeBlock(
@@ -77,7 +74,7 @@ fun CodeBlock(
                 modifier = Modifier.weight(1f),
             )
             TextButton(onClick = { raw = !raw }) {
-                Text(if (raw) "Resaltado" else "Crudo")
+                Text(if (raw) "Ver resaltado" else "Ver crudo")
             }
             CopyButton(text = code, label = "Copiar código")
         }
@@ -103,6 +100,11 @@ fun CodeBlock(
                     Text(
                         text = highlight(line, language),
                         style = codeStyle(),
+                        // The code surface is the same dark ground in both themes,
+                        // so plain code is always the light text colour; without
+                        // this it inherits the light theme's dark content colour
+                        // and only the coloured tokens would be readable.
+                        color = TextPrimary,
                         softWrap = false,
                     )
                 }
@@ -176,19 +178,11 @@ private fun codeStyle() = MaterialTheme.typography.bodySmall.copy(
 /** Colour one tokenised line, using the same meanings the status palette uses. */
 @Composable
 private fun highlight(line: String, language: String?): AnnotatedString {
-    val keyword = MaterialTheme.colorScheme.primary
-    val string = LocalStatusColors.current.done
-    val comment = TextMuted
-    return buildAnnotatedString {
-        CodeHighlighter.tokenizeLine(line, language).forEach { span ->
-            val style = when (span.token) {
-                CodeToken.PLAIN -> null
-                CodeToken.KEYWORD -> SpanStyle(color = keyword)
-                CodeToken.STRING -> SpanStyle(color = string)
-                CodeToken.COMMENT -> SpanStyle(color = comment)
-                CodeToken.NUMBER -> SpanStyle(color = NumberAmber)
-            }
-            if (style == null) append(span.text) else withStyle(style) { append(span.text) }
-        }
-    }
+    val palette = CodePalette(
+        keyword = MaterialTheme.colorScheme.primary,
+        string = LocalStatusColors.current.done,
+        comment = TextMuted,
+        number = NumberAmber,
+    )
+    return annotateLine(line, language, palette)
 }

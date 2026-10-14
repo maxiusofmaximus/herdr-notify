@@ -1,5 +1,11 @@
 package dev.herdrnotify.app.ui
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+
 /**
  * A tiny, line-at-a-time syntax highlighter.
  *
@@ -16,6 +22,42 @@ enum class CodeToken { PLAIN, KEYWORD, STRING, COMMENT, NUMBER }
 
 /** A run of a line and how it should be drawn. */
 data class CodeSpan(val text: String, val token: CodeToken)
+
+/**
+ * The four colours a code line is painted with.
+ *
+ * A plain value type rather than reading the theme directly, so the annotation
+ * is a pure function that can be tested for the spans it actually produces —
+ * the point of the whole exercise being that the colours reach the text.
+ */
+data class CodePalette(
+    val keyword: Color,
+    val string: Color,
+    val comment: Color,
+    val number: Color,
+)
+
+/**
+ * Colour one line: the tokenizer's spans mapped onto [palette].
+ *
+ * Kept out of the composable on purpose. "The block rendered white even though
+ * it said Resaltado" is a claim about spans, so the thing that builds the spans
+ * is a plain function a unit test can inspect, not something reachable only
+ * through a Composable.
+ */
+fun annotateLine(line: String, language: String?, palette: CodePalette): AnnotatedString =
+    buildAnnotatedString {
+        CodeHighlighter.tokenizeLine(line, language).forEach { span ->
+            val style = when (span.token) {
+                CodeToken.PLAIN -> null
+                CodeToken.KEYWORD -> SpanStyle(color = palette.keyword)
+                CodeToken.STRING -> SpanStyle(color = palette.string)
+                CodeToken.COMMENT -> SpanStyle(color = palette.comment)
+                CodeToken.NUMBER -> SpanStyle(color = palette.number)
+            }
+            if (style == null) append(span.text) else withStyle(style) { append(span.text) }
+        }
+    }
 
 object CodeHighlighter {
 

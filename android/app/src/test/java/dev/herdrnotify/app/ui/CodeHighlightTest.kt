@@ -1,5 +1,6 @@
 package dev.herdrnotify.app.ui
 
+import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -65,5 +66,43 @@ class CodeHighlightTest {
         val line = "val s = \"unterminated"
 
         assertEquals(line, CodeHighlighter.tokenizeLine(line, "kotlin").joinToString("") { it.text })
+    }
+
+    private val palette = CodePalette(
+        keyword = Color(0xFF111111),
+        string = Color(0xFF222222),
+        comment = Color(0xFF333333),
+        number = Color(0xFF444444),
+    )
+
+    @Test
+    fun `annotating a line paints keyword, number and comment spans`() {
+        val line = "val x = 3 // nota"
+
+        val annotated = annotateLine(line, "kotlin", palette)
+        val colors = annotated.spanStyles.map { it.item.color }
+
+        assertEquals("the text must survive untouched", line, annotated.text)
+        assertTrue("keyword span missing: $annotated", colors.contains(palette.keyword))
+        assertTrue("number span missing: $annotated", colors.contains(palette.number))
+        assertTrue("comment span missing: $annotated", colors.contains(palette.comment))
+    }
+
+    @Test
+    fun `annotating paints string spans`() {
+        val annotated = annotateLine("val s = \"hola\"", "kotlin", palette)
+        val colors = annotated.spanStyles.map { it.item.color }
+
+        assertTrue("string span missing: $annotated", colors.contains(palette.string))
+        assertTrue("keyword span missing: $annotated", colors.contains(palette.keyword))
+    }
+
+    @Test
+    fun `a plain line produces no colour spans`() {
+        val annotated = annotateLine("total = suma de cosas", null, palette)
+
+        // No keyword/string/comment/number tokens: nothing should be coloured,
+        // so a highlighted block is never uniformly painted.
+        assertTrue("plain prose must not be coloured: ${annotated.spanStyles}", annotated.spanStyles.isEmpty())
     }
 }
