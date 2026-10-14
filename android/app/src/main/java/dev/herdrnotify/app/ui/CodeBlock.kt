@@ -21,19 +21,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.herdrnotify.app.ui.theme.LocalStatusColors
 import dev.herdrnotify.app.ui.theme.Spacing
-import dev.herdrnotify.app.ui.theme.Surface2
-import dev.herdrnotify.app.ui.theme.TextMuted
-import dev.herdrnotify.app.ui.theme.TextPrimary
-
-/** Amber for numbers, the one syntax colour the status palette does not name. */
-private val NumberAmber = Color(0xFFD29922)
 
 /**
  * A code block the agent printed, rendered like one.
@@ -58,7 +50,7 @@ fun CodeBlock(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .background(Surface2)
+            .background(CodeColors.surface)
             .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp)),
     ) {
         Row(
@@ -70,7 +62,7 @@ fun CodeBlock(
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelMedium,
-                color = TextMuted,
+                color = CodeColors.comment,
                 modifier = Modifier.weight(1f),
             )
             TextButton(onClick = { raw = !raw }) {
@@ -82,7 +74,7 @@ fun CodeBlock(
             Text(
                 text = code,
                 style = codeStyle(),
-                color = TextPrimary,
+                color = CodeColors.plain,
                 softWrap = false,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -104,7 +96,7 @@ fun CodeBlock(
                         // so plain code is always the light text colour; without
                         // this it inherits the light theme's dark content colour
                         // and only the coloured tokens would be readable.
-                        color = TextPrimary,
+                        color = CodeColors.plain,
                         softWrap = false,
                     )
                 }
@@ -121,13 +113,12 @@ fun CodeBlock(
  */
 @Composable
 fun DiffBlock(lines: List<ChangeLine>, modifier: Modifier = Modifier) {
-    val colors = LocalStatusColors.current
     val text = remember(lines) { lines.joinToString("\n") { it.text } }
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .background(Surface2)
+            .background(CodeColors.surface)
             .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp)),
     ) {
         Row(
@@ -139,7 +130,7 @@ fun DiffBlock(lines: List<ChangeLine>, modifier: Modifier = Modifier) {
             Text(
                 text = "Cambios",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextMuted,
+                color = CodeColors.comment,
                 modifier = Modifier.weight(1f),
             )
             CopyButton(text = text, label = "Copiar diff")
@@ -151,16 +142,17 @@ fun DiffBlock(lines: List<ChangeLine>, modifier: Modifier = Modifier) {
                 .padding(start = Spacing.lg, end = Spacing.lg, bottom = Spacing.md),
         ) {
             lines.forEach { line ->
-                val color = when (line.kind) {
-                    ChangeKind.ADDED -> colors.done
-                    ChangeKind.REMOVED -> MaterialTheme.colorScheme.error
-                    ChangeKind.META -> MaterialTheme.colorScheme.primary
-                    ChangeKind.CONTEXT -> MaterialTheme.colorScheme.onSurfaceVariant
-                }
                 Text(
                     text = line.text,
                     style = codeStyle(),
-                    color = color,
+                    // Diff colours are the light-on-dark set too, for the same
+                    // reason: the diff is drawn on the same dark slab.
+                    color = when (line.kind) {
+                        ChangeKind.ADDED -> CodeColors.added
+                        ChangeKind.REMOVED -> CodeColors.removed
+                        ChangeKind.META -> CodeColors.meta
+                        ChangeKind.CONTEXT -> CodeColors.context
+                    },
                     softWrap = false,
                 )
             }
@@ -175,14 +167,14 @@ private fun codeStyle() = MaterialTheme.typography.bodySmall.copy(
     lineHeight = 18.sp,
 )
 
-/** Colour one tokenised line, using the same meanings the status palette uses. */
+/** Colour one tokenised line from the fixed dark-surface palette. */
 @Composable
 private fun highlight(line: String, language: String?): AnnotatedString {
     val palette = CodePalette(
-        keyword = MaterialTheme.colorScheme.primary,
-        string = LocalStatusColors.current.done,
-        comment = TextMuted,
-        number = NumberAmber,
+        keyword = CodeColors.keyword,
+        string = CodeColors.string,
+        comment = CodeColors.comment,
+        number = CodeColors.number,
     )
     return annotateLine(line, language, palette)
 }

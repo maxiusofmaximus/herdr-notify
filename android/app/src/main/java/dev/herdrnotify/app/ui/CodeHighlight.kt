@@ -5,6 +5,12 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
+import dev.herdrnotify.app.ui.theme.AccentBlue
+import dev.herdrnotify.app.ui.theme.StatusBlocked
+import dev.herdrnotify.app.ui.theme.StatusDone
+import dev.herdrnotify.app.ui.theme.Surface2
+import dev.herdrnotify.app.ui.theme.TextPrimary
+import dev.herdrnotify.app.ui.theme.TextSecondary
 
 /**
  * A tiny, line-at-a-time syntax highlighter.
@@ -36,6 +42,33 @@ data class CodePalette(
     val comment: Color,
     val number: Color,
 )
+
+/**
+ * The colours code is drawn with, fixed to the dark ground the code surface
+ * always uses.
+ *
+ * A code block is a dark slab in *every* theme, so its palette must be the
+ * light-on-dark one — the theme's own `primary`/`error` are tuned for a light
+ * background and, over a dark slab, are the low-contrast pair that made `fun`
+ * and the diff routes hard to read in the light theme. Kept here as plain values
+ * so a test can check each one against the surface; they are deliberately *not*
+ * read from [androidx.compose.material3.MaterialTheme].
+ */
+object CodeColors {
+    /** The code surface itself, the ground every colour below is checked against. */
+    val surface: Color = Surface2
+    val plain: Color = TextPrimary
+    val keyword: Color = AccentBlue
+    val string: Color = StatusDone
+    val comment: Color = TextSecondary
+    val number: Color = Color(0xFFD29922)
+
+    // Diff line colours, on the same ground.
+    val added: Color = StatusDone
+    val removed: Color = StatusBlocked
+    val meta: Color = AccentBlue
+    val context: Color = TextSecondary
+}
 
 /**
  * Colour one line: the tokenizer's spans mapped onto [palette].
