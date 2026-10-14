@@ -3,6 +3,7 @@ package dev.herdrnotify.app.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -305,4 +306,22 @@ fun StateBlock(
 fun Context.copyToClipboard(label: String, text: String) {
     val manager = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
     manager.setPrimaryClip(ClipData.newPlainText(label, text))
+}
+
+/**
+ * Hand a message to the system share sheet.
+ *
+ * The chooser is launched with `NEW_TASK` because the caller may be a
+ * non-Activity context; a share that throws (no app can take it) is swallowed
+ * rather than crashing the chat, since sharing is a convenience and not the
+ * only way to get the text out.
+ */
+fun Context.shareText(label: String, text: String) {
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, label)
+        putExtra(Intent.EXTRA_TEXT, text)
+    }
+    val chooser = Intent.createChooser(send, label).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { startActivity(chooser) }
 }

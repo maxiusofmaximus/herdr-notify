@@ -164,6 +164,20 @@ class TriageViewModel(
         send(current.paneId, current.draft.trim())
     }
 
+    /**
+     * Send a prompt again, from a message's Retry action.
+     *
+     * The text comes from the transcript rather than the composer — a retry of
+     * an earlier turn — so it is sent directly, without the "not waiting"
+     * confirmation the composer asks: choosing Retry on a message is already an
+     * explicit decision to send that text again.
+     */
+    fun onRetryPrompt(text: String) {
+        val current = _detail.value ?: return
+        if (current.sending || text.isBlank()) return
+        send(current.paneId, text.trim())
+    }
+
     fun onDismissConfirm() {
         _detail.update { it?.copy(confirmRequired = false) }
     }

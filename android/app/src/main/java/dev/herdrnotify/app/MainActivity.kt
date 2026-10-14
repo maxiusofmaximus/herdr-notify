@@ -293,6 +293,7 @@ private fun TriageApp(container: AppContainer, onRepair: () -> Unit) {
             onConfirmSend = viewModel::onConfirmSend,
             onDismissConfirm = viewModel::onDismissConfirm,
             onPermissionKeys = viewModel::onPermissionKeys,
+            onRetry = viewModel::onRetryPrompt,
             onStop = viewModel::onStopAgent,
             onConfirmStop = viewModel::onConfirmStop,
             onDismissStop = viewModel::onDismissStop,

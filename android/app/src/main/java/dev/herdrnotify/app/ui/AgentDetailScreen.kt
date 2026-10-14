@@ -111,6 +111,7 @@ fun AgentDetailScreen(
     onConfirmSend: () -> Unit,
     onDismissConfirm: () -> Unit,
     onPermissionKeys: (List<String>, Boolean) -> Unit,
+    onRetry: (String) -> Unit,
     onStop: () -> Unit,
     onConfirmStop: () -> Unit,
     onDismissStop: () -> Unit,
@@ -269,6 +270,8 @@ fun AgentDetailScreen(
                             onPermissionKeys(option.keys, false)
                         }
                     },
+                    onRetry = onRetry,
+                    onViewRaw = { rawMode = true },
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -396,6 +399,8 @@ private fun Placeholder(text: String) {
 private fun Transcript(
     entries: List<TranscriptEntry>,
     onPermissionOption: (PermissionOption) -> Unit,
+    onRetry: (String) -> Unit,
+    onViewRaw: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scroll = rememberScrollState()
@@ -407,10 +412,40 @@ private fun Transcript(
             .verticalScroll(scroll),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
+        // The prompt that produced the agent's current turn, so an agent message
+        // can retry it. Reset by the next person's turn.
+        var lastUser: String? = null
         entries.forEach { entry ->
             when (entry) {
-                is TranscriptEntry.User -> Bubble(text = entry.text, fromUser = true)
-                is TranscriptEntry.Agent -> Bubble(text = entry.text, fromUser = false)
+                is TranscriptEntry.User -> {
+                    Column(Modifier.fillMaxWidth()) {
+                        Bubble(text = entry.text, fromUser = true)
+                        MessageActions(
+                            role = MessageRole.USER,
+                            text = entry.text,
+                            retryText = entry.text,
+                            canViewRaw = false,
+                            onRetry = onRetry,
+                            onViewRaw = onViewRaw,
+                            modifier = Modifier.align(Alignment.End),
+                        )
+                    }
+                    lastUser = entry.text
+                }
+
+                is TranscriptEntry.Agent -> Column(Modifier.fillMaxWidth()) {
+                    Bubble(text = entry.text, fromUser = false)
+                    MessageActions(
+                        role = MessageRole.AGENT,
+                        text = entry.text,
+                        retryText = lastUser,
+                        canViewRaw = true,
+                        onRetry = onRetry,
+                        onViewRaw = onViewRaw,
+                        modifier = Modifier.align(Alignment.Start),
+                    )
+                }
+
                 is TranscriptEntry.Status -> StatusRow(entry)
                 is TranscriptEntry.Permission -> PermissionCard(entry.prompt, onPermissionOption)
                 is TranscriptEntry.Changes -> DiffBlock(entry.lines)

@@ -58,6 +58,7 @@ class ChatPreviewActivity : ComponentActivity() {
                     onConfirmSend = {},
                     onDismissConfirm = {},
                     onPermissionKeys = { _, _ -> },
+                    onRetry = {},
                     onStop = {},
                     onConfirmStop = {},
                     onDismissStop = {},

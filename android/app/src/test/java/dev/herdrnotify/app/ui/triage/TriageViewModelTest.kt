@@ -344,6 +344,37 @@ class TriageViewModelTest {
     }
 
     @Test
+    fun `retrying a message sends that text directly, without the confirmation`() = runTest {
+        val repo = FakeTriageRepository()
+        val vm = TriageViewModel(repo, backgroundScope)
+        // The agent is working: the composer would ask before sending, but a
+        // Retry on a message is already an explicit decision to send again.
+        repo.emit(ConnectionState.Live(stateWith(agent("w1:p1", AgentStatus.WORKING))))
+        vm.onOpenAgent("w1:p1")
+        runCurrent()
+
+        vm.onRetryPrompt("  arregla el scroll  ")
+        runCurrent()
+
+        assertEquals(listOf("w1:p1" to "arregla el scroll"), repo.replies)
+        assertFalse(vm.detail.value!!.confirmRequired)
+    }
+
+    @Test
+    fun `retrying a blank message sends nothing`() = runTest {
+        val repo = FakeTriageRepository()
+        val vm = TriageViewModel(repo, backgroundScope)
+        repo.emit(ConnectionState.Live(stateWith(agent("w1:p1", AgentStatus.BLOCKED))))
+        vm.onOpenAgent("w1:p1")
+        runCurrent()
+
+        vm.onRetryPrompt("   ")
+        runCurrent()
+
+        assertTrue(repo.replies.isEmpty())
+    }
+
+    @Test
     fun `a 403 on send says the phone may not send, and the connection stays as it was`() = runTest {
         val repo = FakeTriageRepository()
         repo.respondResult = Result.failure(GatewayClient.GatewayError.NotPermitted("forbidden"))
