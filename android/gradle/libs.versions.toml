@@ -24,6 +24,8 @@ androidxTestJunit = "1.2.1"
 espresso = "3.6.1"
 turbine = "1.2.0"
 mockk = "1.13.13"
+camerax = "1.4.2"
+mlkitBarcodeScanning = "17.3.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -72,6 +74,17 @@ androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-co
 turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
 mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
+
+# CameraX drives the camera preview and the analysis stream behind the QR
+# scanner. Version 1.4.x is the stable line; the alpha 1.7 line is not used.
+androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camerax" }
+androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
+androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
+androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
+# The *bundled* ML Kit barcode model: the QR scanner works offline and on the
+# first try, without a Play Services model download. See the comment in the app
+# build file for why bundled beats the thin artifact here.
+mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcodeScanning" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

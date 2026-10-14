@@ -206,6 +206,18 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
 
+    // The QR pairing scanner: CameraX for the preview and the frame stream, and
+    // the *bundled* ML Kit barcode model so scanning is offline and immediate.
+    // The thin (play-services) artifact is smaller on disk but downloads the
+    // model on first use — a pairing that needs the internet to start is a
+    // pairing that fails exactly when the operator is setting the phone up away
+    // from a network. Bundled is the honest default for a self-hosted tool.
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.mlkit.barcode.scanning)
+
     // Firebase is optional at runtime: the app is fully usable on the live
     // stream alone, and a missing google-services.json must not break the
     // release build. See docs/architecture.md, "Push is an accelerant".

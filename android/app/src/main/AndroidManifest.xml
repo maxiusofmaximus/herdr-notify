@@ -7,6 +7,14 @@
     <!-- Required from API 33 to show a notification. The runtime prompt is part of
          first-run, not a one-off buried in settings. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The QR scanner. Requested with a rationale at the moment of scanning,
+         never at first launch, so a phone that is paired by hand never sees it. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- The camera is not required: a phone without one can still pair by hand,
+         so the app must stay installable. -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <!-- Held only while the live event stream is connected, so the OS can tell a
          foreground service from a leaked one. -->
