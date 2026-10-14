@@ -234,6 +234,9 @@ private fun PairingRoute(
         onDismissRecovery = viewModel::dismissRecovery,
         onPickPeer = viewModel::onPickPeer,
         onRefreshPeers = viewModel::onRefreshPeers,
+        onQrScanned = viewModel::onQrScanned,
+        onDismissQrError = viewModel::dismissQrError,
+        onDismissCodeError = viewModel::dismissCodeError,
     )
 }
 
