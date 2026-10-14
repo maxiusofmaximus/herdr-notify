@@ -14,5 +14,9 @@
             android:name=".EmptyPreviewActivity"
             android:exported="true"
             android:theme="@style/Theme.HerdrNotify" />
+        <activity
+            android:name=".PairingPreviewActivity"
+            android:exported="true"
+            android:theme="@style/Theme.HerdrNotify" />
     </application>
 </manifest>

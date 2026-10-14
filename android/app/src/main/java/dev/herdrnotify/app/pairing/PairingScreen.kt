@@ -67,8 +67,6 @@ import dev.herdrnotify.app.ui.ValueRow
 import dev.herdrnotify.app.ui.copyToClipboard
 import dev.herdrnotify.app.ui.theme.MonoKey
 import dev.herdrnotify.app.ui.theme.Spacing
-import dev.herdrnotify.app.ui.theme.TextPrimary
-import dev.herdrnotify.app.ui.theme.TextSecondary
 
 /**
  * Pairing, shown when the app has no device identity yet.
@@ -182,13 +180,13 @@ fun PairingScreen(
             Text(
                 text = "Emparejar este teléfono",
                 style = MaterialTheme.typography.headlineSmall,
-                color = TextPrimary,
+                color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
                 text = "La clave se genera aquí y no sale del teléfono. Regístrala con un " +
                     "código, o déjalo vacío para aprobarla desde el host.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
 
@@ -280,7 +278,7 @@ private fun PeerPickerCard(
                 Text(
                     text = "Equipos en tu tailnet",
                     style = MaterialTheme.typography.titleMedium,
-                    color = TextPrimary,
+                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f),
                 )
                 if (state.peersLoading) {
@@ -339,7 +337,7 @@ private fun PeerRow(peer: TailnetPeer, onClick: () -> Unit) {
                 Text(
                     text = peer.name,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = TextPrimary,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -347,7 +345,7 @@ private fun PeerRow(peer: TailnetPeer, onClick: () -> Unit) {
                     text = peer.addresses.firstOrNull().orEmpty() +
                         if (peer.online) " · en línea" else " · desconectado",
                     style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -375,7 +373,7 @@ private fun PairingCodeCard(
                 Text(
                     text = "Código de emparejamiento",
                     style = MaterialTheme.typography.titleMedium,
-                    color = TextPrimary,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
                 Caption(
                     "En el host, ejecuta herdr-notify enroll y escribe aquí el código que " +
@@ -447,13 +445,13 @@ private fun AdvancedToggle(expanded: Boolean, onToggle: () -> Unit) {
         Text(
             text = "Avanzado: emparejar a mano",
             style = MaterialTheme.typography.labelLarge,
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
         )
         Icon(
             imageVector = Icons.Filled.ExpandMore,
             contentDescription = null,
-            tint = TextSecondary,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.rotate(rotation),
         )
     }
@@ -481,7 +479,7 @@ private fun AdvancedSection(
                     Text(
                         text = "Identidad de este teléfono",
                         style = MaterialTheme.typography.titleMedium,
-                        color = TextPrimary,
+                        color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f),
                     )
                     if (!state.publicKey.isNullOrBlank()) {
@@ -567,12 +565,12 @@ private fun RecoveryCodeDialog(
                     text = "Se muestra una sola vez. Sirve para volver a emparejar este " +
                         "teléfono sin ayuda del equipo.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
                     text = code,
                     style = MonoKey,
-                    color = TextPrimary,
+                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.semantics {
                         contentDescription = "Código de recuperación: $code"
                     },

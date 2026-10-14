@@ -70,6 +70,7 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import dev.herdrnotify.app.ui.NoticeAction
 import dev.herdrnotify.app.ui.NoticeCard
+import dev.herdrnotify.app.ui.theme.HerdrNotifyTheme
 import dev.herdrnotify.app.ui.theme.Spacing
 import dev.herdrnotify.app.ui.theme.TextPrimary
 import dev.herdrnotify.app.ui.theme.TextSecondary
@@ -211,6 +212,9 @@ fun QrScannerContent(
     preview: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // The scanner is a camera view: it stays dark whatever the app theme, so the
+    // reticle, the copy and the error card read over the feed.
+    HerdrNotifyTheme(darkTheme = true) {
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -291,6 +295,7 @@ fun QrScannerContent(
         if (processing) {
             ProcessingOverlay()
         }
+    }
     }
 }
 
