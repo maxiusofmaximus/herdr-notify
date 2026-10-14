@@ -589,4 +589,76 @@ class TriageViewModelTest {
         )
         assertFalse(vm.detail.value!!.sending)
     }
+
+    @Test
+    fun `stopping a working agent asks first, then sends ctrl+c with confirm`() = runTest {
+        val repo = FakeTriageRepository()
+        val vm = TriageViewModel(repo, backgroundScope)
+        repo.emit(ConnectionState.Live(stateWith(agent("w1:p1", AgentStatus.WORKING))))
+        vm.onOpenAgent("w1:p1")
+        runCurrent()
+
+        vm.onStopAgent()
+        assertTrue("stopping must be confirmed before anything is sent", vm.detail.value!!.stopRequired)
+        assertTrue("no key may be sent before the confirmation", repo.keyBatches.isEmpty())
+
+        vm.onConfirmStop()
+        runCurrent()
+
+        assertEquals(
+            "the interrupt key must be sent as a guarded key",
+            listOf(Triple("w1:p1", listOf("ctrl+c"), true)),
+            repo.keyBatches,
+        )
+        assertFalse(vm.detail.value!!.stopRequired)
+        assertFalse(vm.detail.value!!.sending)
+    }
+
+    @Test
+    fun `dismissing the stop confirmation sends nothing`() = runTest {
+        val repo = FakeTriageRepository()
+        val vm = TriageViewModel(repo, backgroundScope)
+        repo.emit(ConnectionState.Live(stateWith(agent("w1:p1", AgentStatus.WORKING))))
+        vm.onOpenAgent("w1:p1")
+        runCurrent()
+
+        vm.onStopAgent()
+        vm.onDismissStop()
+        runCurrent()
+
+        assertTrue(repo.keyBatches.isEmpty())
+        assertFalse(vm.detail.value!!.stopRequired)
+    }
+
+    @Test
+    fun `a 403 on stop says the phone may not stop the agent`() = runTest {
+        val repo = FakeTriageRepository()
+        repo.sendKeysResult = Result.failure(GatewayClient.GatewayError.NotPermitted("forbidden"))
+        val vm = TriageViewModel(repo, backgroundScope)
+        repo.emit(ConnectionState.Live(stateWith(agent("w1:p1", AgentStatus.WORKING))))
+        vm.onOpenAgent("w1:p1")
+        runCurrent()
+
+        vm.onStopAgent()
+        vm.onConfirmStop()
+        runCurrent()
+
+        assertEquals(
+            "Este teléfono no tiene permiso para detener al agente",
+            vm.detail.value!!.notice,
+        )
+        assertFalse(vm.detail.value!!.sending)
+    }
+
+    @Test
+    fun `a stop that finds the agent no longer working says so`() {
+        assertEquals(
+            "El agente ya no está trabajando",
+            stopFailure(GatewayClient.GatewayError.Rejected(409, "working")),
+        )
+        assertEquals(
+            "Este agente ya no existe",
+            stopFailure(GatewayClient.GatewayError.Rejected(404, "agent target wQ:pG not found")),
+        )
+    }
 }

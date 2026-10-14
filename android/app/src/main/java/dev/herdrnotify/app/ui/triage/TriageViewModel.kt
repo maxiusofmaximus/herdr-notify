@@ -174,6 +174,39 @@ class TriageViewModel(
      * there, or the agent moved on.
      */
     fun onPermissionKeys(keys: List<String>, confirmed: Boolean) {
+        submitKeys(keys, confirmed, ::keyFailure)
+    }
+
+    /**
+     * Ask to interrupt the agent.
+     *
+     * Interrupting stops work in progress and cannot be undone, so the first tap
+     * only opens the question; [onConfirmStop] is the answer that sends the keys.
+     */
+    fun onStopAgent() {
+        _detail.update { it?.copy(stopRequired = true) }
+    }
+
+    fun onDismissStop() {
+        _detail.update { it?.copy(stopRequired = false) }
+    }
+
+    /** The person confirmed: send the interrupt keys to the agent. */
+    fun onConfirmStop() {
+        val current = _detail.value ?: return
+        _detail.update { if (it?.paneId == current.paneId) it.copy(stopRequired = false) else it }
+        // `ctrl+c` is the key the gateway marks as guarded, so it is sent with
+        // `confirm = true`; the dialog above is what that confirmation means.
+        submitKeys(STOP_KEYS, confirmed = true, ::stopFailure)
+    }
+
+    /**
+     * Send a batch of keys and map the outcome onto the screen.
+     *
+     * Shared by the permission card and the stop button: both answer the agent
+     * with a keystroke and both have to report a refusal rather than swallow it.
+     */
+    private fun submitKeys(keys: List<String>, confirmed: Boolean, failure: (Throwable) -> String) {
         val current = _detail.value ?: return
         if (current.sending) return
         val paneId = current.paneId
@@ -187,7 +220,7 @@ class TriageViewModel(
                 .onFailure { error ->
                     _detail.update {
                         if (it?.paneId == paneId) {
-                            it.copy(sending = false, notice = keyFailure(error))
+                            it.copy(sending = false, notice = failure(error))
                         } else {
                             it
                         }
@@ -365,6 +398,14 @@ class TriageViewModel(
 
         /** The tail of the pane that the detail shows. */
         const val OUTPUT_LINES = 60
+
+        /**
+         * The keystroke that interrupts an agent mid-work.
+         *
+         * `ctrl+c` is the one key the gateway treats as guarded: it stops what
+         * the agent is doing, which is why the screen asks before sending it.
+         */
+        val STOP_KEYS = listOf("ctrl+c")
     }
 }
 
@@ -383,6 +424,7 @@ data class AgentDetail(
     val sending: Boolean = false,
     val notice: String? = null,
     val confirmRequired: Boolean = false,
+    val stopRequired: Boolean = false,
     val attachment: PendingImage? = null,
 )
 
@@ -468,6 +510,21 @@ internal fun keyFailure(error: Throwable): String = when {
         "El agente ya no espera esa aprobación"
 
     else -> "No se pudo enviar la respuesta. Inténtalo de nuevo."
+}
+
+/** What a failed stop means to the person. */
+internal fun stopFailure(error: Throwable): String = when {
+    error.isAgentGone() -> "Este agente ya no existe"
+
+    error is GatewayClient.GatewayError.NotPermitted ->
+        "Este teléfono no tiene permiso para detener al agente"
+
+    // The agent finished or moved on between the tap and the key, so there is
+    // nothing left to interrupt.
+    error is GatewayClient.GatewayError.Rejected && error.code == 409 ->
+        "El agente ya no está trabajando"
+
+    else -> "No se pudo detener el agente. Inténtalo de nuevo."
 }
 
 /** The agent with this pane id in whatever list the connection last showed. */

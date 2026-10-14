@@ -4,6 +4,12 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -39,6 +45,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -64,11 +71,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.herdrnotify.app.R
+import dev.herdrnotify.app.domain.AgentStatus
 import dev.herdrnotify.app.domain.AgentSummary
 import dev.herdrnotify.app.ui.theme.LocalStatusColors
 import dev.herdrnotify.app.ui.theme.Spacing
@@ -101,6 +111,9 @@ fun AgentDetailScreen(
     onConfirmSend: () -> Unit,
     onDismissConfirm: () -> Unit,
     onPermissionKeys: (List<String>, Boolean) -> Unit,
+    onStop: () -> Unit,
+    onConfirmStop: () -> Unit,
+    onDismissStop: () -> Unit,
     onAttachImage: (ByteArray, String) -> Unit,
     onClearAttachment: () -> Unit,
 ) {
@@ -118,6 +131,25 @@ fun AgentDetailScreen(
             },
             dismissButton = {
                 TextButton(onClick = onDismissConfirm) { Text("Cancelar") }
+            },
+        )
+    }
+
+    // Interrupting is not reversible, so the stop button is a question first.
+    if (detail.stopRequired) {
+        AlertDialog(
+            onDismissRequest = onDismissStop,
+            title = { Text(stringResource(R.string.action_stop_confirm_title)) },
+            text = { Text(stringResource(R.string.action_stop_confirm_body)) },
+            confirmButton = {
+                TextButton(onClick = onConfirmStop) {
+                    Text(stringResource(R.string.action_stop_agent))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissStop) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             },
         )
     }
@@ -180,8 +212,13 @@ fun AgentDetailScreen(
         bottomBar = {
             Composer(
                 detail = detail,
+                // The agent's own status decides whether the composer offers a
+                // Stop: the reference apps make the composer the place generation
+                // is cancelled, and this mirrors the signal the list already shows.
+                working = agent?.status == AgentStatus.WORKING,
                 onDraftChange = onDraftChange,
                 onSend = onSend,
+                onStop = onStop,
                 onAttachImage = onAttachImage,
                 onClearAttachment = onClearAttachment,
             )
@@ -642,8 +679,10 @@ private fun RawOutput(output: String, modifier: Modifier = Modifier) {
 @Composable
 private fun Composer(
     detail: AgentDetail,
+    working: Boolean,
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
+    onStop: () -> Unit,
     onAttachImage: (ByteArray, String) -> Unit,
     onClearAttachment: () -> Unit,
 ) {
@@ -679,6 +718,10 @@ private fun Composer(
             AttachmentChip(image = image, enabled = !detail.sending, onRemove = onClearAttachment)
             Spacer(Modifier.height(Spacing.xs))
         }
+        if (working) {
+            StreamingIndicator()
+            Spacer(Modifier.height(Spacing.sm))
+        }
         Row(verticalAlignment = Alignment.Bottom) {
             IconButton(
                 onClick = {
@@ -703,6 +746,15 @@ private fun Composer(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { onSend() }),
             )
+            if (working) {
+                IconButton(onClick = onStop, enabled = !detail.sending) {
+                    Icon(
+                        imageVector = Icons.Filled.Stop,
+                        contentDescription = stringResource(R.string.action_stop_agent),
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
             Spacer(Modifier.width(Spacing.sm))
             Button(
                 onClick = onSend,
@@ -711,6 +763,51 @@ private fun Composer(
                 Text("Enviar")
             }
         }
+    }
+}
+
+/**
+ * A quiet "the agent is working" line for the composer: three dots that pulse in
+ * sequence beside the words.
+ *
+ * The status is already in the header, but the composer is where the person's
+ * thumb is while they wait, so the same signal is repeated where the decision to
+ * wait or to stop is made. The dots use the working colour so the motion is the
+ * same "in progress" the list shows.
+ */
+@Composable
+private fun StreamingIndicator() {
+    val accent = LocalStatusColors.current.working
+    val transition = rememberInfiniteTransition(label = "streaming")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        repeat(3) { index ->
+            val alpha by transition.animateFloat(
+                initialValue = 0.25f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(
+                        durationMillis = 600,
+                        delayMillis = index * 160,
+                        easing = LinearEasing,
+                    ),
+                    repeatMode = RepeatMode.Reverse,
+                ),
+                label = "streaming-dot-$index",
+            )
+            Box(
+                Modifier
+                    .size(7.dp)
+                    .clip(CircleShape)
+                    .background(accent.copy(alpha = alpha)),
+            )
+            if (index < 2) Spacer(Modifier.width(4.dp))
+        }
+        Spacer(Modifier.width(Spacing.sm))
+        Text(
+            text = "El agente está trabajando…",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
