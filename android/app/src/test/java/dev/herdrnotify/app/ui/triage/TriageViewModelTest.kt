@@ -405,6 +405,104 @@ class TriageViewModelTest {
     }
 
     @Test
+    fun `a 404 on read says the agent is gone, not that reading failed`() {
+        // The symptom this pins: a chat left open for a pane the operator
+        // closed showed the red generic read failure and polled forever.
+        assertEquals(
+            "Este agente ya no existe",
+            readFailure(GatewayClient.GatewayError.Rejected(404, "agent target wQ:pG not found")),
+        )
+    }
+
+    @Test
+    fun `a 404 on send and on a permission answer say the agent is gone`() {
+        val gone = GatewayClient.GatewayError.Rejected(404, "agent target wQ:pG not found")
+        assertEquals("Este agente ya no existe", sendFailure(gone))
+        assertEquals("Este agente ya no existe", keyFailure(gone))
+    }
+
+    @Test
+    fun `a 409 is still the working or awaiting answer, never the gone one`() {
+        val conflict = GatewayClient.GatewayError.Rejected(409, "cannot read while working")
+        assertFalse(conflict.isAgentGone())
+        assertEquals(
+            "El agente está trabajando; se leerá la salida en un momento",
+            readFailure(conflict),
+        )
+    }
+
+    @Test
+    fun `a gone agent stops the poll and asks for a fresh state`() = runTest {
+        val repo = FakeTriageRepository()
+        repo.readResult = Result.failure(
+            GatewayClient.GatewayError.Rejected(404, "agent target wQ:pG not found"),
+        )
+        val vm = TriageViewModel(repo, backgroundScope)
+        repo.emit(ConnectionState.Live(stateWith(agent("wQ:pG", AgentStatus.WORKING))))
+        vm.onOpenAgent("wQ:pG")
+        runCurrent()
+
+        assertEquals("Este agente ya no existe", vm.detail.value?.outputError)
+        assertEquals("one read is all a gone pane gets", 1, repo.reads.size)
+
+        advanceTimeBy(TriageViewModel.POLL_MILLIS * 5)
+        runCurrent()
+        assertEquals("a gone pane must not be polled", 1, repo.reads.size)
+        assertEquals("the list is re-read so the row can go", 1, repo.refreshes)
+    }
+
+    @Test
+    fun `a 404 on send says the agent is gone and stops the poll too`() = runTest {
+        val repo = FakeTriageRepository()
+        repo.respondResult = Result.failure(
+            GatewayClient.GatewayError.Rejected(404, "agent target wQ:pG not found"),
+        )
+        val vm = TriageViewModel(repo, backgroundScope)
+        repo.emit(ConnectionState.Live(stateWith(agent("wQ:pG", AgentStatus.BLOCKED))))
+        vm.onOpenAgent("wQ:pG")
+        runCurrent()
+        val readsBeforeSend = repo.reads.size
+
+        vm.onDraftChange("hola")
+        vm.onSend()
+        runCurrent()
+
+        assertEquals("Este agente ya no existe", vm.detail.value!!.notice)
+        assertEquals("the list is re-read so the row can go", 1, repo.refreshes)
+
+        advanceTimeBy(TriageViewModel.POLL_MILLIS * 5)
+        runCurrent()
+        assertEquals("a gone pane must not be polled", readsBeforeSend, repo.reads.size)
+    }
+
+    @Test
+    fun `the refreshed state drops the agent that is gone`() = runTest {
+        val repo = FakeTriageRepository()
+        repo.readResult = Result.failure(
+            GatewayClient.GatewayError.Rejected(404, "agent target wQ:pG not found"),
+        )
+        val vm = TriageViewModel(repo, backgroundScope)
+        repo.emit(
+            ConnectionState.Live(
+                stateWith(
+                    agent("wQ:pG", AgentStatus.WORKING),
+                    agent("w1:p1", AgentStatus.BLOCKED),
+                ),
+            ),
+        )
+        vm.onOpenAgent("wQ:pG")
+        runCurrent()
+        assertTrue(vm.state.value is ConnectionState.Live)
+
+        // The refresh the 404 asked for: /v1/state no longer carries the pane
+        // the operator closed, and the list renders exactly what it is given.
+        repo.emit(ConnectionState.Live(stateWith(agent("w1:p1", AgentStatus.BLOCKED))))
+        val agents = (vm.state.value as ConnectionState.Live).state.agents
+        assertEquals(listOf("w1:p1"), agents.map { it.paneId })
+        assertFalse(agents.any { it.paneId == "wQ:pG" })
+    }
+
+    @Test
     fun `any other failure on send gets the generic message`() = runTest {
         val repo = FakeTriageRepository()
         repo.respondResult = Result.failure(IllegalStateException("boom"))

@@ -98,8 +98,7 @@ class TriageViewModel(
 
     /** Back to the list. Stops the output poll, so nothing reads in the background. */
     fun onCloseAgent() {
-        pollJob?.cancel()
-        pollJob = null
+        stopPolling()
         _detail.value = null
     }
 
@@ -193,6 +192,7 @@ class TriageViewModel(
                             it
                         }
                     }
+                    if (error.isAgentGone()) onAgentGone()
                 }
         }
     }
@@ -238,6 +238,7 @@ class TriageViewModel(
                             it
                         }
                     }
+                    if (error.isAgentGone()) onAgentGone()
                 }
         }
     }
@@ -258,6 +259,24 @@ class TriageViewModel(
         }
     }
 
+    private fun stopPolling() {
+        pollJob?.cancel()
+        pollJob = null
+    }
+
+    /**
+     * The gateway said the pane no longer exists (`404 agent_not_found`).
+     *
+     * Nothing here can recover: the agent was closed on the PC while this chat
+     * was open. So the poll stops — a loop that can only fail again is noise —
+     * and the state is re-read, which is what removes the row: the list renders
+     * `/v1/state`, and a closed pane is no longer in it.
+     */
+    private fun onAgentGone() {
+        stopPolling()
+        scope.launch { repository.refresh() }
+    }
+
     private suspend fun readOutput(paneId: String) {
         repository.read(paneId, OUTPUT_LINES)
             .onSuccess { text ->
@@ -269,6 +288,7 @@ class TriageViewModel(
                 _detail.update {
                     if (it?.paneId == paneId) it.copy(outputError = readFailure(error)) else it
                 }
+                if (error.isAgentGone()) onAgentGone()
             }
     }
 
@@ -379,6 +399,18 @@ data class NewChatState(
     val error: String? = null,
 )
 
+/**
+ * The gateway's `404 agent_not_found`: the pane this chat addresses has been
+ * closed on the PC, so the agent is gone rather than busy.
+ *
+ * Deliberately its own test and not a case of [GatewayClient.GatewayError.Rejected]'s
+ * other codes: 409 is herdr refusing a *live* agent (waiting for an approval,
+ * on its alternate screen), which the poll must keep retrying, while 404 is the
+ * one refusal that can never succeed.
+ */
+internal fun Throwable.isAgentGone(): Boolean =
+    this is GatewayClient.GatewayError.Rejected && code == 404
+
 /** What a failed conversation create means to the person. */
 internal fun newChatFailure(error: Throwable): String = when {
     error is GatewayClient.GatewayError.NotPermitted ->
@@ -392,6 +424,8 @@ internal fun newChatFailure(error: Throwable): String = when {
 
 /** What a failed send means to the person, from the typed error. */
 internal fun sendFailure(error: Throwable): String = when {
+    error.isAgentGone() -> "Este agente ya no existe"
+
     error is GatewayClient.GatewayError.NotPermitted ->
         "Este teléfono no tiene permiso para enviar mensajes"
 
@@ -403,6 +437,11 @@ internal fun sendFailure(error: Throwable): String = when {
 
 /** What a failed read means to the person. */
 internal fun readFailure(error: Throwable): String = when {
+    // The pane is gone: herdr has no such agent any more, which the gateway
+    // reports as 404 agent_not_found. Saying "could not read the output" would
+    // promise a retry that can never succeed.
+    error.isAgentGone() -> "Este agente ya no existe"
+
     error is GatewayClient.GatewayError.NotPermitted ->
         "Este teléfono no tiene permiso para leer este agente"
 
@@ -418,6 +457,8 @@ internal fun readFailure(error: Throwable): String = when {
 
 /** What a failed answer to a permission dialog means to the person. */
 internal fun keyFailure(error: Throwable): String = when {
+    error.isAgentGone() -> "Este agente ya no existe"
+
     error is GatewayClient.GatewayError.NotPermitted ->
         "Este teléfono no tiene permiso para responder al agente"
 

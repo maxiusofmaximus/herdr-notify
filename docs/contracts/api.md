@@ -83,6 +83,10 @@ herdr 0.9.1 clears a "done" badge only through `agent.focus`, which would also
 move the operator's terminal, so the phone marks the agent seen locally and the
 gateway calls nothing (updated: this route no longer reaches herdr).
 
+A pane that no longer exists answers `404` with `{"code": "agent_not_found"}`
+on both (`errors.md`): `focus` gets that answer from herdr, `seen` from the
+gateway's own mirror, since it makes no herdr call at all.
+
 ### `POST /v1/agents/{pane_id}/read`
 
 Body: `{ "lines": 60 }` (optional). Clamped to 1…200, default 60. Response:
@@ -90,6 +94,11 @@ Body: `{ "lines": 60 }` (optional). Clamped to 1…200, default 60. Response:
 ```json
 { "text": "…", "pane_id": "w1:p3" }
 ```
+
+A pane herdr no longer knows is `404 agent_not_found`, and the visible-screen
+fallback is not attempted for it. A working agent whose alternate screen
+refuses the history source is still read through that fallback; if both
+sources are refused the answer remains `409`.
 
 ### `POST /v1/agents/{pane_id}/image`
 
@@ -114,9 +123,10 @@ Response:
 
 Failures: `400` with an action code (`unsupported_type`, `invalid_image`,
 `empty_image`, `image_too_large`, `type_mismatch`), `403` without `RESPOND`,
-`409` if herdr refuses the prompt, `413` if the signed body exceeds the image
-cap. Requires `RESPOND`: attaching a picture drives the agent exactly as sending
-a prompt does.
+`404` with `agent_not_found` when the pane is gone (the stored file is removed,
+as it is for a `409`), `409` if herdr refuses the prompt, `413` if the signed
+body exceeds the image cap. Requires `RESPOND`: attaching a picture drives the
+agent exactly as sending a prompt does.
 
 > **IMPLEMENTED.** The Android side (`ImageAttachment`, `sendImage`) validates
 > the same 5 MiB ceiling and the three types before sending.
@@ -125,7 +135,9 @@ a prompt does.
 
 Writes return `{"ok": true, "result": {…}}` where `result` is trimmed to what the
 app needs (for a prompt: `pane_id`, `agent`, `agent_status`). herdr's own
-refusal is a `409`, not a gateway fault (`errors.md`).
+refusal is a `409`, not a gateway fault (`errors.md`); a target pane that no
+longer exists is a `404` with `{"code": "agent_not_found"}`, which the app
+answers by saying the agent is gone and stopping its poll (`errors.md`).
 
 ### `POST /v1/me/fcm-token`
 

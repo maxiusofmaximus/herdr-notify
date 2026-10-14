@@ -83,6 +83,29 @@ MAX_SIGNED_BODY = 256 * 1024
 #: observe it would make the suite slower for no reason.
 STREAM_KEEPALIVE_SECONDS: Final = 20.0
 
+#: herdr error codes that mean "the pane this phone is addressing is gone".
+#: herdr answers ``agent_not_found`` ("agent target wQ:pG not found") when a
+#: chat is open for a pane that has since been closed; ``not_found`` is the
+#: same answer spelled by older builds and by the test double.
+AGENT_NOT_FOUND_CODES: Final = frozenset({"agent_not_found", "not_found"})
+
+
+def _agent_not_found(exc: HerdrError) -> bool:
+    """Whether herdr's refusal means the target pane no longer exists."""
+    return exc.code in AGENT_NOT_FOUND_CODES
+
+
+def _agent_gone(message: str) -> HTTPException:
+    """A stable 404 the app branches on, rather than herdr's wording.
+
+    The code is the contract, not the message: the phone stops polling and
+    drops the agent on ``agent_not_found``, and a message it cannot parse
+    would leave it showing a generic failure forever.
+    """
+    return HTTPException(
+        status_code=404, detail={"code": "agent_not_found", "message": message}
+    )
+
 
 class ApiConfig(BaseModel):
     """Everything the app needs to know. Secrets are not among them."""
@@ -360,6 +383,11 @@ def create_app(
             # herdr's own refusal is a legitimate answer, not a gateway fault:
             # an agent that is no longer blocked, or a prompt herdr declined.
             log.info("herdr refused %s: %s", method, exc)
+            if _agent_not_found(exc):
+                # The pane is gone rather than unwilling: a chat left open for
+                # an agent the operator closed on the PC. 409 would tell the
+                # phone to keep waiting for a state that cannot come back.
+                raise _agent_gone(str(exc)) from exc
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     def act_or_400(builder: Any, *args: Any, **kwargs: Any) -> Any:
@@ -592,6 +620,12 @@ def create_app(
         """
         del verified
         target = act_or_400(validate_pane_id, pane_id)
+        if target not in ctx.store.state.agents:
+            # This route never reaches herdr, so herdr cannot be the one to say
+            # the pane is gone — the gateway's own mirror is. The answer is the
+            # same 404 and the same code as the routes that do call herdr, so a
+            # phone sees one meaning for "this agent no longer exists".
+            raise _agent_gone(f"agent target {target} not found")
         return {"ok": True, "pane_id": target}
 
     @app.post("/v1/agents/{pane_id}/read")

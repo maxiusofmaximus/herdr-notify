@@ -152,6 +152,9 @@ class FakeTriageRepository(
     var newChatResult: Result<String?> = Result.success(null)
     var sendImageResult: Result<Unit> = Result.success(Unit)
 
+    /** How often the list was re-read from `/v1/state`. */
+    var refreshes = 0
+
     override suspend fun markSeen(paneId: String) {
         seen += paneId
     }
@@ -184,7 +187,9 @@ class FakeTriageRepository(
         return sendKeysResult
     }
 
-    override suspend fun refresh() = Unit
+    override suspend fun refresh() {
+        refreshes++
+    }
 
     override suspend fun newChat(name: String): Result<String?> {
         newChats += name

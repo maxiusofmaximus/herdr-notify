@@ -9,12 +9,37 @@ Authoritative code: `gateway/src/herdr_notify/api/{app,actions,ratelimit}.py`.
 | `400` | `invalid_body`, or `{code, message}` from an action | Body is not JSON / missing field; or an action failed validation |
 | `401` | `"unauthorized"` | Any authentication rejection (uniform — see below) |
 | `403` | `"forbidden"` | Any authorization rejection (uniform — see below) |
+| `404` | `{ "code": "agent_not_found", "message": … }` | The addressed pane no longer exists (see below) |
 | `409` | herdr's own message | herdr declined the action (legitimate answer, not a fault) |
 | `413` | `"body too large"` | Body exceeds the cap (8 KB enroll/pair, 256 KB signed, image route's own larger cap) |
 | `422` | `{ "code": "invalid_body", "errors": [...] }` | A signed body failed model validation |
 | `429` | `"slow down"` / `"too many open streams"` | Rate limit, or per-device stream cap |
 
 `429` responses carry `Retry-After` (integer seconds).
+
+## `agent_not_found` (404)
+
+herdr answers `agent_not_found` ("agent target wQ:pG not found") when a request
+addresses a pane that was closed on the PC — the everyday case of a chat left
+open for an agent that is gone. That is a state of the world, not a refusal:
+a `409` told the phone to keep waiting for a state that could never come back,
+and it rendered as the generic red "could not read the agent's output" while
+the poll retried forever.
+
+| Routes | Where the answer comes from |
+|--------|-----------------------------|
+| `respond`, `keys`, `focus`, `read`, `image` | herdr's error code, mapped once in `perform()` |
+| `seen` | the gateway's own mirror (`store.state.agents`) — this route never reaches herdr |
+
+Body: `{ "code": "agent_not_found", "message": … }`. The **code** is the
+contract; the message is herdr's wording and may change. The app branches on
+the status and the code: it shows "Este agente ya no existe", stops the output
+poll, and the next `/v1/state` refresh drops the agent from the list.
+
+`read` does not try its visible-screen fallback on a `404`: herdr has already
+said there is no pane to read. Every other herdr refusal stays `409`,
+including the alternate-screen refusal of a working agent, which is a
+transient state the app renders as "the agent is working".
 
 ## Pairing (Fase 2(c))
 
@@ -46,7 +71,8 @@ A request is evaluated in this order, cheapest and most security-relevant first:
 4. For writes, write rate limit → `429`.
 5. Body size → `413`; body parse → `400`/`422`.
 6. Action validation → `400` with an action code.
-7. herdr → `409` if it refuses.
+7. herdr → `409` if it refuses, `404` (`agent_not_found`) if the target pane is
+   gone.
 
 An authorization failure happens before the rate limit and before `last_seen`
 is updated: an unauthorized request consumes no budget and leaves no trace.

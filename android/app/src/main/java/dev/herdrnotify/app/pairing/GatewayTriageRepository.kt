@@ -241,8 +241,28 @@ class GatewayTriageRepository(
         confirmed: Boolean,
     ): Result<Unit> = request { it.sendKeys(paneId, keys, confirmed) }.map { }
 
+    /**
+     * Re-read `/v1/state` and publish what it says.
+     *
+     * This is what removes an agent the host no longer has: a chat answered
+     * with `404 agent_not_found` asks for one refresh, and the body that comes
+     * back no longer carries the closed pane, so the row disappears. A body
+     * older than what is on screen is dropped, so a slow answer cannot roll
+     * the list back to a state it has already left.
+     */
     override suspend fun refresh() {
-        call { it.state() }
+        request { it.state() }.onSuccess { body ->
+            val fresh = Wire.state(body) ?: return
+            val shown = when (val current = _connection.value) {
+                is ConnectionState.Live -> current.state.revision
+                is ConnectionState.Offline -> current.lastKnown.revision
+                else -> 0L
+            }
+            if (fresh.revision < shown) return
+            _connection.value = applySeen(
+                ConnectionState.Live(fresh, System.currentTimeMillis()),
+            )
+        }
     }
 
     override suspend fun newChat(name: String): Result<String?> =

@@ -547,6 +547,102 @@ def test_read_falls_back_to_visible_when_herdr_refuses_the_history_source(
     assert seen_sources == [READ_SOURCE, READ_FALLBACK_SOURCE]
 
 
+def test_read_still_answers_409_when_the_visible_screen_is_refused_too(
+    app_client: Harness,
+) -> None:
+    """A working pane that refuses both sources is a conflict, not a gone one.
+
+    The fallback turns herdr's alternate-screen refusal into a 200; if herdr
+    refuses the visible screen as well, the 409 still has to reach the phone,
+    which renders it as "the agent is working" rather than a fault.
+    """
+    seen_sources: list[str] = []
+
+    class RefusingEverything:
+        async def request(
+            self, method: str, params: dict[str, Any] | None = None
+        ) -> dict[str, Any]:
+            params = params or {}
+            seen_sources.append(str(params.get("source")))
+            raise HerdrError("agent.read: cannot read while working")
+
+    app_client.context.client = RefusingEverything()  # type: ignore[assignment]
+    response = app_client.call("POST", "/v1/agents/w1:p1/read", {"lines": 20})
+    assert response.status_code == 409
+    assert seen_sources == [READ_SOURCE, READ_FALLBACK_SOURCE]
+
+
+# -- a pane that no longer exists -------------------------------------------
+
+
+class GoneHerdr:
+    """herdr's answer for the pane of an agent the operator closed.
+
+    The one refusal that is a state of the world rather than a mood: no
+    retry, no fallback, and a code the phone can branch on.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = params or {}
+        self.calls.append((method, payload))
+        raise HerdrError(
+            f"{method}: agent target {payload.get('target')} not found",
+            code="agent_not_found",
+        )
+
+
+def test_a_read_of_a_gone_pane_is_a_404_with_a_stable_code(app_client: Harness) -> None:
+    """The chat left open for a closed pane must not render as a read failure.
+
+    Before, herdr's ``agent_not_found`` was mapped to the generic 409 and the
+    phone showed its red "No se pudo leer la salida del agente" while retrying
+    forever. The visible-screen fallback must not run either: herdr has
+    already said the pane is not there to read.
+    """
+    gone = GoneHerdr()
+    app_client.context.client = gone  # type: ignore[assignment]
+    response = app_client.call("POST", "/v1/agents/wQ:pG/read", {"lines": 20})
+    assert response.status_code == 404
+    detail = response.json()["detail"]
+    assert detail["code"] == "agent_not_found"
+    assert "wQ:pG" in detail["message"]
+    assert [method for method, _ in gone.calls] == ["agent.read"], "no fallback retry"
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        ("/v1/agents/wQ:pG/respond", {"text": "sí"}),
+        ("/v1/agents/wQ:pG/keys", {"keys": ["enter"]}),
+        ("/v1/agents/wQ:pG/focus", None),
+    ],
+)
+def test_the_act_routes_answer_404_for_a_gone_pane(
+    app_client: Harness, path: str, payload: dict[str, Any] | None
+) -> None:
+    app_client.context.client = GoneHerdr()  # type: ignore[assignment]
+    response = app_client.call("POST", path, payload)
+    assert response.status_code == 404, path
+    assert response.json()["detail"]["code"] == "agent_not_found", path
+
+
+def test_seen_for_a_pane_the_gateway_does_not_mirror_is_404(app_client: Harness) -> None:
+    """"seen" never reaches herdr, so its answer comes from the mirror.
+
+    A phone acknowledging a badge for an agent that is already gone gets the
+    same 404 and the same code as every other route, from the one source that
+    can answer it without a herdr round trip.
+    """
+    app_client.herdr.calls.clear()
+    response = app_client.call("POST", "/v1/agents/wQ:pG/seen")
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "agent_not_found"
+    assert app_client.herdr.calls == [], "seen must not call herdr"
+
+
 # -- image attachments ------------------------------------------------------
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"fake png body"
@@ -658,6 +754,16 @@ def test_a_refused_prompt_removes_the_stored_image(app_client: Harness) -> None:
         "POST", "/v1/agents/w1:p1/image", image_payload(PNG_BYTES, "image/png")
     )
     assert response.status_code == 409
+    assert not app_client.images.exists() or not any(app_client.images.iterdir())
+
+
+def test_an_image_for_a_gone_pane_is_a_404_and_leaves_no_file(app_client: Harness) -> None:
+    app_client.context.client = GoneHerdr()  # type: ignore[assignment]
+    response = app_client.call(
+        "POST", "/v1/agents/wQ:pG/image", image_payload(PNG_BYTES, "image/png")
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "agent_not_found"
     assert not app_client.images.exists() or not any(app_client.images.iterdir())
 
 
