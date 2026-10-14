@@ -6,7 +6,12 @@
     <string name="triage_title">Agentes</string>
     <string name="triage_subtitle_none">Nada en marcha</string>
     <string name="triage_empty_title">Ningún agente en marcha</string>
-    <string name="triage_empty_body">Arranca un agente en herdr y aparecerá aquí en cuanto lo detecte.</string>
+    <string name="triage_empty_body">Un agente es una sesión de trabajo (opencode, Claude…) que corre en tu PC. El teléfono la sigue y te avisa cuando necesita una respuesta tuya.</string>
+    <string name="triage_empty_steps_title">CÓMO EMPEZAR</string>
+    <string name="triage_empty_step_1">En el PC, abre herdr y arranca un agente en un proyecto.</string>
+    <string name="triage_empty_step_2">En cuanto el equipo lo detecte, aparecerá aquí con su estado.</string>
+    <string name="triage_empty_step_3">O crea una conversación nueva desde el teléfono.</string>
+    <string name="action_new_chat">+ Nueva conversación</string>
     <string name="triage_filter_all">Todo</string>
     <string name="triage_filter_needs_you">Te esperan</string>
     <string name="triage_filter_active">Trabajando</string>

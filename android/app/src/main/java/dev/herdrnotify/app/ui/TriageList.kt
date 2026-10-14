@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +49,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -57,6 +59,9 @@ import dev.herdrnotify.app.domain.AgentSummary
 import dev.herdrnotify.app.domain.SessionState
 import dev.herdrnotify.app.ui.theme.LocalStatusColors
 import dev.herdrnotify.app.ui.theme.Spacing
+import dev.herdrnotify.app.ui.theme.Surface2
+import dev.herdrnotify.app.ui.theme.TextPrimary
+import dev.herdrnotify.app.ui.theme.TextSecondary
 import dev.herdrnotify.app.ui.triage.ProjectGroup
 import dev.herdrnotify.app.ui.triage.filterAgents
 import dev.herdrnotify.app.ui.triage.groupByProject
@@ -356,18 +361,73 @@ private fun TriageRow(agent: AgentSummary, onClick: () -> Unit) {
 @Composable
 private fun EmptyTriage(modifier: Modifier = Modifier, onNewChat: () -> Unit = {}) {
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        StateBlock(
-            icon = {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.xl),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Surface2),
+                contentAlignment = Alignment.Center,
+            ) {
                 Icon(
                     imageVector = Icons.Filled.Bolt,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            },
-            title = stringResource(R.string.triage_empty_title),
-            body = stringResource(R.string.triage_empty_body),
-            modifier = Modifier.padding(Spacing.xl),
-            action = { NewChatRow(onNewChat = onNewChat) },
+            }
+            Text(
+                text = stringResource(R.string.triage_empty_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = TextPrimary,
+            )
+            // What an agent *is*, for the person who opened the app to an empty
+            // list and has not used it before. A blank screen with "nothing here"
+            // teaches nothing; this says what would appear and how to make it.
+            Text(
+                text = stringResource(R.string.triage_empty_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextSecondary,
+                textAlign = TextAlign.Center,
+            )
+            HerdrCard {
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    SectionLabel(stringResource(R.string.triage_empty_steps_title))
+                    EmptyStep("1", stringResource(R.string.triage_empty_step_1))
+                    EmptyStep("2", stringResource(R.string.triage_empty_step_2))
+                    EmptyStep("3", stringResource(R.string.triage_empty_step_3))
+                }
+            }
+            Button(
+                onClick = onNewChat,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp),
+            ) {
+                Text(stringResource(R.string.action_new_chat))
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyStep(number: String, text: String) {
+    Row(verticalAlignment = Alignment.Top) {
+        Text(
+            text = number,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.width(Spacing.sm))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = TextSecondary,
         )
     }
 }

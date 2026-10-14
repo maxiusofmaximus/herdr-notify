@@ -10,5 +10,9 @@
             android:name=".ChatPreviewActivity"
             android:exported="true"
             android:theme="@style/Theme.HerdrNotify" />
+        <activity
+            android:name=".EmptyPreviewActivity"
+            android:exported="true"
+            android:theme="@style/Theme.HerdrNotify" />
     </application>
 </manifest>
