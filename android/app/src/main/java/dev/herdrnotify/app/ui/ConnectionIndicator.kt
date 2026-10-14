@@ -12,16 +12,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.herdrnotify.app.domain.ConnectionState
 import dev.herdrnotify.app.ui.theme.LocalStatusColors
@@ -156,13 +159,15 @@ fun ConnectionDialog(
             }
         },
         confirmButton = {
-            // One consistent order and one column — Retry, re-pair, gateway —
-            // rather than splitting the same three across two slots, and without
-            // the wrapping a single row of three buttons gets on a narrow phone.
-            Column(horizontalAlignment = Alignment.End) {
-                TextButton(onClick = onRetry) { Text("Reintentar") }
-                TextButton(onClick = onRepair) { Text("Reemparejar") }
-                TextButton(onClick = onChangeGateway) { Text("Gateway") }
+            // The three actions stacked tightly. The default minimum-touch
+            // padding Material puts around every button is what made this short
+            // list look airy; as one group, a snug stack reads better.
+            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                Column(horizontalAlignment = Alignment.End) {
+                    TextButton(onClick = onRetry) { Text("Reintentar") }
+                    TextButton(onClick = onRepair) { Text("Reemparejar") }
+                    TextButton(onClick = onChangeGateway) { Text("Gateway") }
+                }
             }
         },
     )
