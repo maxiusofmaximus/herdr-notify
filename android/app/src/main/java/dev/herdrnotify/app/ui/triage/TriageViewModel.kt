@@ -296,8 +296,12 @@ class TriageViewModel(
     }
 
     /**
-     * Read the output now and then every [POLL_MILLIS] until closed.
+     * Read the output now and then keep reading until closed.
      *
+     * The normal cadence is [POLL_MILLIS], but a *transient* read — the agent is
+     * working and herdr refuses the history source — is retried on the short
+     * [RETRY_MILLIS] cadence instead, so the tail appears the moment the agent
+     * comes back to the conversation rather than up to fifteen seconds later.
      * Restarting cancels the previous loop first, so a send that forces a read
      * does not leave two loops running side by side for the same agent.
      */
@@ -305,8 +309,8 @@ class TriageViewModel(
         pollJob?.cancel()
         pollJob = scope.launch {
             while (isActive) {
-                readOutput(paneId)
-                delay(POLL_MILLIS)
+                val transient = readOutput(paneId)
+                delay(if (transient) RETRY_MILLIS else POLL_MILLIS)
             }
         }
     }
@@ -329,7 +333,12 @@ class TriageViewModel(
         scope.launch { repository.refresh() }
     }
 
-    private suspend fun readOutput(paneId: String) {
+    /**
+     * Read the output once. Returns whether the failure was transient, so the
+     * poll can choose the short retry cadence for it.
+     */
+    private suspend fun readOutput(paneId: String): Boolean {
+        var transient = false
         repository.read(paneId, OUTPUT_LINES)
             .onSuccess { text ->
                 _detail.update {
@@ -337,11 +346,13 @@ class TriageViewModel(
                 }
             }
             .onFailure { error ->
+                transient = error.isTransientRead()
                 _detail.update {
                     if (it?.paneId == paneId) it.copy(outputError = readError(error)) else it
                 }
                 if (error.isAgentGone()) onAgentGone()
             }
+        return transient
     }
 
     /** Open the "Nueva conversación" form. */
@@ -415,6 +426,13 @@ class TriageViewModel(
          */
         const val POLL_MILLIS = 15_000L
 
+        /**
+         * How soon to re-read after a transient failure (the agent is working).
+         * Short, because the read will succeed as soon as the agent is back on
+         * the conversation and the person is waiting to see the tail.
+         */
+        const val RETRY_MILLIS = 2_000L
+
         /** The tail of the pane that the detail shows. */
         const val OUTPUT_LINES = 60
 
@@ -453,9 +471,15 @@ data class AgentDetail(
  * [retryable] is what decides whether the error card offers a Retry button at
  * all: offering one for a closed pane or a missing permission is offering a
  * button that can never succeed, which reads as the app being broken rather
- * than the situation being final.
+ * than the situation being final. [transient] marks the "the agent is working,
+ * the output will load in a moment" case, which is not a failure at all and is
+ * drawn as a neutral notice with a short automatic retry.
  */
-data class ChatError(val message: String, val retryable: Boolean)
+data class ChatError(
+    val message: String,
+    val retryable: Boolean,
+    val transient: Boolean = false,
+)
 
 /** An image chosen for the next message, held in memory until it is sent. */
 data class PendingImage(val bytes: ByteArray, val mime: String)
@@ -540,7 +564,16 @@ internal fun readError(error: Throwable): ChatError = ChatError(
         error is GatewayClient.GatewayError.NotPermitted -> false
         else -> true
     },
+    transient = error.isTransientRead(),
 )
+
+/**
+ * The conflict herdr answers while the agent's pane is on its alternate screen:
+ * a normal state, not a fault. The read will succeed once the agent comes back
+ * to the conversation, so the screen shows it as a notice and retries sooner.
+ */
+internal fun Throwable.isTransientRead(): Boolean =
+    this is GatewayClient.GatewayError.Rejected && code == 409
 
 /** What a failed answer to a permission dialog means to the person. */
 internal fun keyFailure(error: Throwable): String = when {

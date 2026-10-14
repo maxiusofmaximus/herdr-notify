@@ -239,11 +239,18 @@ fun AgentDetailScreen(
             var rawMode by rememberSaveable { mutableStateOf(false) }
 
             detail.outputError?.let { problem ->
+                // "The agent is working; the output will load in a moment" is a
+                // normal state, not a failure: shown as a neutral notice with no
+                // Retry button (the read retries itself), so red is reserved for
+                // things that are actually broken.
                 NoticeCard(
                     message = problem.message,
-                    title = "No se pudo leer el agente",
+                    title = if (problem.transient) "Leyendo el agente" else "No se pudo leer el agente",
+                    kind = if (problem.transient) NoticeKind.WARNING else NoticeKind.ERROR,
                     actions = buildList {
-                        if (problem.retryable) add(NoticeAction("Reintentar", onRefresh))
+                        if (problem.retryable && !problem.transient) {
+                            add(NoticeAction("Reintentar", onRefresh))
+                        }
                         if (!detail.output.isNullOrBlank()) {
                             add(NoticeAction("Ver salida cruda") { rawMode = true })
                         }

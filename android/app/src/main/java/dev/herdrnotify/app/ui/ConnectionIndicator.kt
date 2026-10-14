@@ -156,10 +156,11 @@ fun ConnectionDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onRetry) { Text("Reintentar") }
-        },
-        dismissButton = {
-            Row {
+            // One consistent order and one column — Retry, re-pair, gateway —
+            // rather than splitting the same three across two slots, and without
+            // the wrapping a single row of three buttons gets on a narrow phone.
+            Column(horizontalAlignment = Alignment.End) {
+                TextButton(onClick = onRetry) { Text("Reintentar") }
                 TextButton(onClick = onRepair) { Text("Reemparejar") }
                 TextButton(onClick = onChangeGateway) { Text("Gateway") }
             }

@@ -47,6 +47,7 @@ class ChatPreviewActivity : ComponentActivity() {
                         outputError = ChatError(
                             message = "El agente está trabajando; se leerá la salida en un momento",
                             retryable = true,
+                            transient = true,
                         ),
                         notice = "No se pudo enviar el mensaje. Inténtalo de nuevo.",
                         draft = "",

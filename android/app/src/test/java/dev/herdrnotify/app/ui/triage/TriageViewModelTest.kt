@@ -441,15 +441,53 @@ class TriageViewModelTest {
         // a permission refusal are final, a transient conflict is not.
         val gone = readError(GatewayClient.GatewayError.Rejected(404, "agent target wQ:pG not found"))
         assertFalse("a closed pane must not offer Retry", gone.retryable)
+        assertFalse("a closed pane is not a transient notice", gone.transient)
 
         val forbidden = readError(GatewayClient.GatewayError.NotPermitted("forbidden"))
         assertFalse("a 403 is final for this action", forbidden.retryable)
 
         val working = readError(GatewayClient.GatewayError.Rejected(409, "working"))
         assertTrue("a transient conflict is worth retrying", working.retryable)
+        assertTrue("the 409 working case is a notice, not an error", working.transient)
 
         val generic = readError(IllegalStateException("boom"))
         assertTrue("an unknown read failure is worth retrying", generic.retryable)
+        assertFalse("an unknown failure is a real error", generic.transient)
+    }
+
+    @Test
+    fun `a transient read failure retries on the short cadence`() = runTest {
+        val repo = FakeTriageRepository()
+        repo.readResult = Result.failure(GatewayClient.GatewayError.Rejected(409, "working"))
+        val vm = TriageViewModel(repo, backgroundScope)
+
+        vm.onOpenAgent("w1:p1")
+        runCurrent()
+        assertEquals("the first read happens at once", 1, repo.reads.size)
+        assertTrue("the working case is transient", vm.detail.value!!.outputError!!.transient)
+
+        advanceTimeBy(TriageViewModel.RETRY_MILLIS)
+        runCurrent()
+        assertEquals("a transient failure is re-read on the short cadence", 2, repo.reads.size)
+    }
+
+    @Test
+    fun `a real read error waits the normal poll interval`() = runTest {
+        val repo = FakeTriageRepository()
+        repo.readResult = Result.failure(IllegalStateException("boom"))
+        val vm = TriageViewModel(repo, backgroundScope)
+
+        vm.onOpenAgent("w1:p1")
+        runCurrent()
+        assertEquals(1, repo.reads.size)
+
+        advanceTimeBy(TriageViewModel.RETRY_MILLIS)
+        runCurrent()
+        assertEquals("a real error must not spin on the short cadence", 1, repo.reads.size)
+
+        advanceTimeBy(TriageViewModel.POLL_MILLIS)
+        runCurrent()
+        assertEquals("it still retries on the normal cadence", 2, repo.reads.size)
     }
 
     @Test
