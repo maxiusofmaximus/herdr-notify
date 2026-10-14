@@ -67,6 +67,11 @@ class PairingViewModelProbeTest {
             injectedScope = this,
         )
         viewModel.awaitLoaded()
+        // The save path refuses a loopback address, and a build with no
+        // `gatewayUrl` in local.properties defaults to one. Pin a routable
+        // address so the test measures the probe decision, not the machine's
+        // default.
+        viewModel.onBaseUrl("http://pc.tailnet.ts.net:8788")
         val typed = viewModel.state.value.baseUrl
 
         var advanced = false
