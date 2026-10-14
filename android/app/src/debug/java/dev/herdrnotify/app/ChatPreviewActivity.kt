@@ -49,7 +49,7 @@ class ChatPreviewActivity : ComponentActivity() {
                             retryable = true,
                         ),
                         notice = "No se pudo enviar el mensaje. Inténtalo de nuevo.",
-                        draft = "reintento",
+                        draft = "",
                     ),
                     onBack = {},
                     onRefresh = {},

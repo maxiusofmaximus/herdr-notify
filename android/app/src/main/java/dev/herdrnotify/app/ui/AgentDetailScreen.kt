@@ -45,12 +45,15 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -740,7 +743,10 @@ private fun Composer(
             StreamingIndicator()
             Spacer(Modifier.height(Spacing.sm))
         }
-        Row(verticalAlignment = Alignment.Bottom) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Bottom,
+        ) {
             IconButton(
                 onClick = {
                     pickImage.launch(
@@ -764,21 +770,35 @@ private fun Composer(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { onSend() }),
             )
-            if (working) {
-                IconButton(onClick = onStop, enabled = !detail.sending) {
+            Spacer(Modifier.width(Spacing.sm))
+            // One slot, two meanings: while the agent is working and there is
+            // nothing typed, it is a filled Stop; the moment there is a draft it
+            // is Enviar again, so a person can always send what they typed.
+            val showStop = working && detail.draft.isBlank()
+            if (showStop) {
+                FilledIconButton(
+                    onClick = onStop,
+                    enabled = !detail.sending,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
+                ) {
                     Icon(
                         imageVector = Icons.Filled.Stop,
                         contentDescription = stringResource(R.string.action_stop_agent),
-                        tint = MaterialTheme.colorScheme.error,
                     )
                 }
-            }
-            Spacer(Modifier.width(Spacing.sm))
-            Button(
-                onClick = onSend,
-                enabled = detail.draft.isNotBlank() && !detail.sending,
-            ) {
-                Text("Enviar")
+            } else {
+                FilledIconButton(
+                    onClick = onSend,
+                    enabled = detail.draft.isNotBlank() && !detail.sending,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Send,
+                        contentDescription = "Enviar",
+                    )
+                }
             }
         }
     }
