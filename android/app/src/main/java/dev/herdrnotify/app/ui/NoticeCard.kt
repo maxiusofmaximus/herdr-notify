@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -50,6 +51,13 @@ fun NoticeCard(
         NoticeKind.ERROR -> MaterialTheme.colorScheme.error
         NoticeKind.WARNING -> LocalStatusColors.current.working
     }
+    // The triangle is reserved for errors; a neutral, informational notice — the
+    // "the agent is working, the output will load" case — gets an info glyph so
+    // the shape does not claim something is wrong.
+    val icon = when (kind) {
+        NoticeKind.ERROR -> Icons.Filled.Warning
+        NoticeKind.WARNING -> Icons.Filled.Info
+    }
     Surface(
         color = accent.copy(alpha = 0.10f),
         shape = RoundedCornerShape(12.dp),
@@ -62,7 +70,7 @@ fun NoticeCard(
         ) {
             Row(verticalAlignment = Alignment.Top) {
                 Icon(
-                    imageVector = Icons.Filled.Warning,
+                    imageVector = icon,
                     contentDescription = null,
                     tint = accent,
                     modifier = Modifier.size(18.dp),
