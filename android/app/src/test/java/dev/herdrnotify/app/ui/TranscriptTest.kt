@@ -376,4 +376,42 @@ class TranscriptTest {
         assertEquals(1, entries.size)
         assertTrue(entries.single() is TranscriptEntry.Agent)
     }
+
+    @Test
+    fun `a fenced block becomes a code entry, not prose`() {
+        val tail = """
+            Aquí va el ejemplo:
+
+            ```kotlin
+            val x = 1
+            // nota
+            ```
+
+            Fin.
+        """.trimIndent()
+
+        val entries = TranscriptParser.parse(tail)
+
+        assertEquals(3, entries.size)
+        assertEquals(TranscriptEntry.Agent("Aquí va el ejemplo:"), entries[0])
+        assertEquals(TranscriptEntry.Code("kotlin", "val x = 1\n// nota"), entries[1])
+        assertEquals(TranscriptEntry.Agent("Fin."), entries[2])
+    }
+
+    @Test
+    fun `a fence with no language keeps its body verbatim`() {
+        val tail = "```\nline that the pane would have wrapped here\n```"
+
+        assertEquals(
+            TranscriptEntry.Code(null, "line that the pane would have wrapped here"),
+            TranscriptParser.parse(tail).single(),
+        )
+    }
+
+    @Test
+    fun `an unterminated fence degrades to text rather than swallowing the tail`() {
+        val entries = TranscriptParser.parse("antes\n```kotlin\nval x = 1")
+
+        assertTrue("an unterminated fence must not become a code card", entries.none { it is TranscriptEntry.Code })
+    }
 }

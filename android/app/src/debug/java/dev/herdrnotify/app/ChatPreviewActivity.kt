@@ -86,6 +86,25 @@ class ChatPreviewActivity : ComponentActivity() {
                 recoger los resúmenes. (disable recaps
             in /config)
 
+            Ejemplo de código:
+
+            ```kotlin
+            fun main() {
+                val saludo = "hola"
+                println(saludo) // imprime
+            }
+            ```
+
+            Diff del cambio:
+
+            --- a/src/foo.kt
+            +++ b/src/foo.kt
+            @@ -1,3 +1,3 @@
+             fun main() {
+            -    old()
+            +    new()
+             }
+
             6% until auto-compact
             ────────────────────────
             ────────────────────────

@@ -52,6 +52,17 @@ sealed interface TranscriptEntry {
     data class Changes(val lines: List<ChangeLine>) : TranscriptEntry {
         override val text: String get() = lines.joinToString("\n") { it.text }
     }
+
+    /**
+     * A fenced code block the agent printed, drawn as a card with a copy button.
+     *
+     * [language] is whatever the opening fence named (`kotlin`, `python`, …), or
+     * null when it named nothing; the body is kept exactly as the terminal drew
+     * it, because a code block is the one thing de-wrapping would corrupt.
+     */
+    data class Code(val language: String?, val code: String) : TranscriptEntry {
+        override val text: String get() = code
+    }
 }
 
 enum class ChangeKind { ADDED, REMOVED, CONTEXT, META }
@@ -202,12 +213,19 @@ object TranscriptParser {
     private val listItem = Regex("^(?:[-*\\u2022\\u2023]|\\d+[.)])\\s")
     private val heading = Regex("^#{1,6}\\s")
 
+    // A fenced code block: an opening run of backticks (optionally naming a
+    // language) and a closing run. The tail is a rendered screen, not a message
+    // log, so an unclosed fence is treated as ordinary text rather than guessed.
+    private val fenceOpen = Regex("^\\s*```(.*)$")
+    private val fenceClose = Regex("^\\s*```\\s*$")
+
     private sealed interface Token {
         data object Boundary : Token
         data class User(val text: String) : Token
         data class Agent(val text: String) : Token
         data class Status(val text: String, val kind: StatusKind) : Token
         data class Changes(val lines: List<ChangeLine>) : Token
+        data class Code(val language: String?, val code: String) : Token
     }
 
     /** A permission block: the half-open line range it occupies, and its prompt. */
@@ -289,6 +307,30 @@ object TranscriptParser {
                 }
                 i++
                 continue
+            }
+
+            // A fenced code block is lifted out whole, so its body is never
+            // de-wrapped or mistaken for prose. An unterminated fence falls
+            // through to normal classification instead of swallowing the tail.
+            fenceOpen.matchEntire(line)?.let { open ->
+                val body = mutableListOf<String>()
+                var j = i + 1
+                var closed = false
+                while (j < lines.size) {
+                    if (fenceClose.matches(lines[j])) {
+                        closed = true
+                        j++
+                        break
+                    }
+                    body += lines[j]
+                    j++
+                }
+                if (closed) {
+                    val language = open.groupValues[1].trim().takeIf { it.isNotEmpty() }
+                    tokens += Token.Code(language, body.joinToString("\n"))
+                    i = j
+                    continue
+                }
             }
 
             if (changeAnchor(line)) {
@@ -441,6 +483,12 @@ object TranscriptParser {
                 is Token.Changes -> {
                     flushAgent()
                     out += TranscriptEntry.Changes(token.lines)
+                    mergeStatus = false
+                }
+
+                is Token.Code -> {
+                    flushAgent()
+                    out += TranscriptEntry.Code(token.language, token.code)
                     mergeStatus = false
                 }
             }

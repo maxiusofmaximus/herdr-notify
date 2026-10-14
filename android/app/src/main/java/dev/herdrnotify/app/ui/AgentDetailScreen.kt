@@ -405,7 +405,8 @@ private fun Transcript(
                 is TranscriptEntry.Agent -> Bubble(text = entry.text, fromUser = false)
                 is TranscriptEntry.Status -> StatusRow(entry)
                 is TranscriptEntry.Permission -> PermissionCard(entry.prompt, onPermissionOption)
-                is TranscriptEntry.Changes -> ChangesBlock(entry)
+                is TranscriptEntry.Changes -> DiffBlock(entry.lines)
+                is TranscriptEntry.Code -> CodeBlock(code = entry.code, language = entry.language)
             }
         }
     }
@@ -466,40 +467,6 @@ private fun PermissionCard(prompt: PermissionPrompt, onOption: (PermissionOption
                         ) { Text(option.label) }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ChangesBlock(changes: TranscriptEntry.Changes) {
-    val colors = LocalStatusColors.current
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            Modifier
-                .horizontalScroll(rememberScrollState())
-                .padding(Spacing.md),
-        ) {
-            changes.lines.forEach { line ->
-                val color = when (line.kind) {
-                    ChangeKind.ADDED -> colors.done
-                    ChangeKind.REMOVED -> MaterialTheme.colorScheme.error
-                    ChangeKind.META -> MaterialTheme.colorScheme.primary
-                    ChangeKind.CONTEXT -> MaterialTheme.colorScheme.onSurfaceVariant
-                }
-                Text(
-                    text = line.text,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp,
-                    ),
-                    color = color,
-                    softWrap = false,
-                )
             }
         }
     }
