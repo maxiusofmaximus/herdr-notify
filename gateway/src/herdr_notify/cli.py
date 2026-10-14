@@ -357,27 +357,98 @@ def _cmd_add_device(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_qr(rendered: str) -> None:
+    """Print the block art, falling back to raw UTF-8 on a legacy console.
+
+    Windows PowerShell 5.1 can leave stdout on a code page without the block
+    characters. Writing UTF-8 bytes keeps the symbol intact for a terminal that
+    decodes it (Windows Terminal does) rather than crashing the command after
+    the pairing code was already printed.
+    """
+    text = rendered + "\n"
+    try:
+        sys.stdout.write(text)
+    except UnicodeEncodeError:
+        sys.stdout.flush()
+        sys.stdout.buffer.write(text.encode("utf-8"))
+    sys.stdout.flush()
+
+
+def _resolve_qr_url(args: argparse.Namespace, view: Any) -> tuple[str | None, int]:
+    """The gateway base URL for ``--qr``, or a clear failure for the operator.
+
+    Returns ``(url, 0)`` on success and ``(None, 2)`` when no source knows a
+    reachable URL. The sources are, in order, ``--url``, the
+    ``HERDR_NOTIFY_PUBLIC_URL`` environment variable, ``gateway.json`` next to
+    the trust store, and the host's own tailnet address.
+    """
+    from .pairing import PUBLIC_URL_ENV, PairingPayloadError, resolve_public_url
+
+    try:
+        url = resolve_public_url(args.url, tailnet=view)
+    except PairingPayloadError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return None, 2
+    if url is not None:
+        return url, 0
+
+    print("error: --qr needs the gateway's public base URL.", file=sys.stderr)
+    print(
+        "  pass --url https://<host> (e.g. https://pc.tailnet.ts.net), or set",
+        file=sys.stderr,
+    )
+    print(
+        f"  {PUBLIC_URL_ENV}, or put {{\"public_url\": \"...\"}} in gateway.json next to",
+        file=sys.stderr,
+    )
+    print(
+        "  the trust store. The host's tailnet address is used when it is known.",
+        file=sys.stderr,
+    )
+    return None, 2
+
+
 def _cmd_enroll(args: argparse.Namespace) -> int:
     """Mint a single-use pairing code for a phone.
 
     The code is printed here, on the operator's own machine, and is the only
     thing that authorises a new device. There is no static secret to distribute.
+
+    With ``--qr`` the same code is also encoded into the payload a phone scans,
+    together with the gateway's base URL. Without ``--qr`` the output is
+    unchanged: the code alone, which the phone's pairing screen accepts.
     """
     from .api.auth import DeviceStore
+    from .pairing import build_pairing_payload, render_qr_ascii
+    from .tailnet import read_status
 
     store = DeviceStore(args.devices)
+    view = read_status()
+
+    # Resolve the QR URL before minting: a missing URL is the operator's to fix,
+    # and it should not leave a live code behind that nothing was told about.
+    qr_url: str | None = None
+    if args.qr:
+        qr_url, code = _resolve_qr_url(args, view)
+        if code != 0:
+            return code
+
     entry = store.issue_enrollment_code(ttl=args.ttl)
     print(f"pairing code : {entry.code}")
     print(f"valid for    : {args.ttl:.0f}s")
     print(f"trust store  : {store.path}")
 
-    from .tailnet import read_status
-
-    view = read_status()
     if view is not None and view.self_peer is not None and view.self_peer.addresses:
         print(f"addresses    : {', '.join(view.self_peer.addresses)}")
     print()
     print("On the phone, enter this code once to register its public key.")
+
+    if args.qr and qr_url is not None:
+        payload = build_pairing_payload(qr_url, entry.code)
+        print()
+        print("scan this QR, or open the URI below:")
+        _print_qr(render_qr_ascii(payload))
+        print(f"pairing uri  : {payload}")
     return 0
 
 
@@ -773,6 +844,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     enroll.add_argument("--devices", type=Path, default=default_store, help="trust store path")
     enroll.add_argument("--ttl", type=float, default=600.0, help="code lifetime in seconds")
+    enroll.add_argument(
+        "--url",
+        help="gateway public base URL for --qr, e.g. https://pc.tailnet.ts.net",
+    )
+    enroll.add_argument(
+        "--qr",
+        action="store_true",
+        help="also print a scannable QR of the pairing payload (needs a base URL)",
+    )
     enroll.set_defaults(func=_cmd_enroll)
 
     devices = sub.add_parser("devices", help="list enrolled devices, and grant or revoke access")
