@@ -542,6 +542,12 @@ private fun Message(
  * that is silently dropped looks exactly like a broken backend. Ask once — with
  * a short reason first — and, when the system will no longer show the dialog,
  * send the person to the settings page instead of asking into the void.
+ *
+ * Postponing ("Ahora no", outside tap) must actually close the dialog: the old
+ * code only flipped a flag that was already true, so no recomposition came and
+ * the dialog could not be dismissed. It is now a persisted timestamp that
+ * suppresses the prompt until the cooldown expires or an explicit attempt at
+ * the permission retires it.
  */
 @Composable
 private fun NotificationPermissionPrompt() {
@@ -550,46 +556,86 @@ private fun NotificationPermissionPrompt() {
         context,
         Manifest.permission.POST_NOTIFICATIONS,
     ) == PackageManager.PERMISSION_GRANTED
-    var asked by rememberSaveable { mutableStateOf(false) }
-    val launcher = rememberLauncherForNotificationPermission { asked = true }
+    // How many times the system dialog has returned a result — not a boolean.
+    // "Already asked" plus a second refusal flips rationale to false without
+    // changing the boolean, and a state that does not change does not
+    // recompose: the dialog would keep the stale rationale on screen forever.
+    // Bumping a counter on every result forces the fresh read; 0 = never asked.
+    var systemResults by rememberSaveable { mutableStateOf(0) }
+    val prefs = remember { context.getSharedPreferences(PROMPT_PREFS, Context.MODE_PRIVATE) }
+    var dismissedAtMs by remember {
+        mutableStateOf(prefs.getLong(KEY_DISMISSED_AT, 0L).takeIf { it > 0L })
+    }
+    val launcher = rememberLauncherForNotificationPermission { systemResults++ }
     val rationale = (context as? Activity)?.let {
         ActivityCompat.shouldShowRequestPermissionRationale(it, Manifest.permission.POST_NOTIFICATIONS)
     } ?: false
 
-    when (NotificationPermissionPolicy.step(Build.VERSION.SDK_INT, granted, asked, rationale)) {
-        NotificationPermissionStep.NOT_NEEDED -> return
+    val dismiss = {
+        val now = System.currentTimeMillis()
+        dismissedAtMs = now
+        prefs.edit().putLong(KEY_DISMISSED_AT, now).apply()
+    }
+    val forgetDismissal = {
+        dismissedAtMs = null
+        prefs.edit().remove(KEY_DISMISSED_AT).apply()
+    }
+
+    when (
+        NotificationPermissionPolicy.step(
+            Build.VERSION.SDK_INT,
+            granted,
+            systemResults > 0,
+            rationale,
+            dismissedAtMs,
+            System.currentTimeMillis(),
+        )
+    ) {
+        // Suppressed is the same visible outcome as "nothing to do": no dialog.
+        NotificationPermissionStep.NOT_NEEDED,
+        NotificationPermissionStep.SUPPRESSED,
+        -> return
+
         NotificationPermissionStep.ASK -> AlertDialog(
-            onDismissRequest = { asked = true },
+            onDismissRequest = dismiss,
             title = { Text(stringResource(R.string.notification_title)) },
             text = { Text(stringResource(R.string.notification_permission_rationale)) },
             confirmButton = {
-                TextButton(onClick = { launcher() }) {
+                TextButton(
+                    onClick = {
+                        forgetDismissal()
+                        launcher()
+                    },
+                ) {
                     Text(stringResource(R.string.notification_permission_allow))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { asked = true }) { Text("Ahora no") }
+                TextButton(onClick = dismiss) { Text("Ahora no") }
             },
         )
 
         NotificationPermissionStep.OPEN_SETTINGS -> AlertDialog(
-            onDismissRequest = { asked = true },
+            onDismissRequest = dismiss,
             title = { Text(stringResource(R.string.notification_blocked_title)) },
             text = { Text(stringResource(R.string.notification_blocked_body)) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         openNotificationSettings(context)
-                        asked = true
+                        forgetDismissal()
                     },
                 ) { Text(stringResource(R.string.notification_open_settings)) }
             },
             dismissButton = {
-                TextButton(onClick = { asked = true }) { Text("Ahora no") }
+                TextButton(onClick = dismiss) { Text("Ahora no") }
             },
         )
     }
 }
+
+private const val PROMPT_PREFS = "notification_prompt"
+private const val KEY_DISMISSED_AT = "dismissed_at"
 
 /** The app's own notification page. There is no more specific deep link. */
 private fun openNotificationSettings(context: Context) {
