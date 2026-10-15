@@ -10,6 +10,11 @@ dependencies = [
     # an auth layer that silently disappears when an extra is missing is the
     # opposite of what this project is for.
     "cryptography>=43",
+    # QR symbol generation for `enroll --qr`. segno is pure Python with no
+    # transitive dependencies and no Pillow/native image backend: it computes
+    # the module matrix, and herdr_notify.pairing renders it as terminal blocks,
+    # so nothing here pulls in an image stack for a string of output.
+    "segno>=1.6",
 ]
 
 [project.optional-dependencies]
