@@ -37,6 +37,8 @@ data class PairingUiState(
     val code: String = "",
     val claiming: Boolean = false,
     val codeError: String? = null,
+    /** Why a scanned QR was refused, shown on the scanner as a card. */
+    val qrError: String? = null,
     /** The recovery code from a successful claim. Shown exactly once. */
     val recoveryCode: String? = null,
     /** Whether one is already held, so a re-pair can offer it as a path. */
@@ -234,6 +236,39 @@ class PairingViewModel(
 
     fun onCode(value: String) {
         _state.update { it.copy(code = value, codeError = null) }
+    }
+
+    /**
+     * A string read off a pairing QR.
+     *
+     * The QR is just another way to fill the two fields the manual flow already
+     * has, so a valid one sets the address and the code and then runs the exact
+     * same [claim] the "Emparejar" button runs — no second pairing path to keep
+     * in step. An invalid one does not touch the fields at all: it records why,
+     * and the scanner shows that as a card with a retry, leaving the manual form
+     * untouched behind it.
+     */
+    fun onQrScanned(raw: String) {
+        when (val result = PairingQrPayload.parse(raw)) {
+            is PairingQrResult.Valid -> {
+                _state.update {
+                    it.copy(
+                        baseUrl = result.payload.baseUrl,
+                        code = result.payload.code,
+                        codeError = null,
+                        qrError = null,
+                    )
+                }
+                claim()
+            }
+
+            is PairingQrResult.Invalid ->
+                _state.update { it.copy(qrError = result.reason) }
+        }
+    }
+
+    fun dismissQrError() {
+        _state.update { it.copy(qrError = null) }
     }
 
     /**

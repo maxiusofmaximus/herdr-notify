@@ -28,6 +28,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -39,6 +40,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,12 +62,11 @@ import dev.herdrnotify.app.ui.CommandBlock
 import dev.herdrnotify.app.ui.CopyButton
 import dev.herdrnotify.app.ui.ErrorText
 import dev.herdrnotify.app.ui.HerdrCard
+import dev.herdrnotify.app.ui.SectionLabel
 import dev.herdrnotify.app.ui.ValueRow
 import dev.herdrnotify.app.ui.copyToClipboard
 import dev.herdrnotify.app.ui.theme.MonoKey
 import dev.herdrnotify.app.ui.theme.Spacing
-import dev.herdrnotify.app.ui.theme.TextPrimary
-import dev.herdrnotify.app.ui.theme.TextSecondary
 
 /**
  * Pairing, shown when the app has no device identity yet.
@@ -101,8 +102,12 @@ fun PairingScreen(
     onDismissRecovery: () -> Unit = {},
     onPickPeer: (TailnetPeer) -> Unit = {},
     onRefreshPeers: () -> Unit = {},
+    onQrScanned: (String) -> Unit = {},
+    onDismissQrError: () -> Unit = {},
+    onDismissCodeError: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    var scanning by rememberSaveable { mutableStateOf(false) }
 
     if (state.isLoading) {
         Box(
@@ -124,6 +129,26 @@ fun PairingScreen(
             onCopy = { context.copyToClipboard("herdr-notify recovery", code) },
             onContinue = onCommit,
         )
+    }
+
+    // A successful claim stops the camera: the recovery dialog is what matters
+    // now, and a live preview behind it is battery spent on nothing.
+    LaunchedEffect(state.claimedDeviceId) {
+        if (state.claimedDeviceId != null) scanning = false
+    }
+
+    if (scanning) {
+        QrScannerScreen(
+            processing = state.claiming,
+            notice = state.qrError ?: state.codeError,
+            onBack = { scanning = false },
+            onRaw = onQrScanned,
+            onRetry = {
+                onDismissQrError()
+                onDismissCodeError()
+            },
+        )
+        return
     }
 
     var advanced by rememberSaveable { mutableStateOf(false) }
@@ -155,15 +180,39 @@ fun PairingScreen(
             Text(
                 text = "Emparejar este teléfono",
                 style = MaterialTheme.typography.headlineSmall,
-                color = TextPrimary,
+                color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
                 text = "La clave se genera aquí y no sale del teléfono. Regístrala con un " +
                     "código, o déjalo vacío para aprobarla desde el host.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+
+        // The QR is the fast path: one scan fills both fields and runs the same
+        // claim the manual button runs. It is offered first, and the manual form
+        // stays right below it for a phone with no camera or a code that will not
+        // scan.
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            Button(
+                onClick = { scanning = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.QrCodeScanner,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(Spacing.sm))
+                Text("Escanear QR")
+            }
+            Caption("Apunta la cámara al código que muestra el equipo al emparejar.")
+        }
+
+        SectionLabel("Vincular manualmente")
 
         PcAddressCard(state = state, onBaseUrl = onBaseUrl)
 
@@ -229,7 +278,7 @@ private fun PeerPickerCard(
                 Text(
                     text = "Equipos en tu tailnet",
                     style = MaterialTheme.typography.titleMedium,
-                    color = TextPrimary,
+                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f),
                 )
                 if (state.peersLoading) {
@@ -288,7 +337,7 @@ private fun PeerRow(peer: TailnetPeer, onClick: () -> Unit) {
                 Text(
                     text = peer.name,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = TextPrimary,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -296,7 +345,7 @@ private fun PeerRow(peer: TailnetPeer, onClick: () -> Unit) {
                     text = peer.addresses.firstOrNull().orEmpty() +
                         if (peer.online) " · en línea" else " · desconectado",
                     style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -324,7 +373,7 @@ private fun PairingCodeCard(
                 Text(
                     text = "Código de emparejamiento",
                     style = MaterialTheme.typography.titleMedium,
-                    color = TextPrimary,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
                 Caption(
                     "En el host, ejecuta herdr-notify enroll y escribe aquí el código que " +
@@ -396,13 +445,13 @@ private fun AdvancedToggle(expanded: Boolean, onToggle: () -> Unit) {
         Text(
             text = "Avanzado: emparejar a mano",
             style = MaterialTheme.typography.labelLarge,
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
         )
         Icon(
             imageVector = Icons.Filled.ExpandMore,
             contentDescription = null,
-            tint = TextSecondary,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.rotate(rotation),
         )
     }
@@ -430,7 +479,7 @@ private fun AdvancedSection(
                     Text(
                         text = "Identidad de este teléfono",
                         style = MaterialTheme.typography.titleMedium,
-                        color = TextPrimary,
+                        color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f),
                     )
                     if (!state.publicKey.isNullOrBlank()) {
@@ -516,12 +565,12 @@ private fun RecoveryCodeDialog(
                     text = "Se muestra una sola vez. Sirve para volver a emparejar este " +
                         "teléfono sin ayuda del equipo.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
                     text = code,
                     style = MonoKey,
-                    color = TextPrimary,
+                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.semantics {
                         contentDescription = "Código de recuperación: $code"
                     },

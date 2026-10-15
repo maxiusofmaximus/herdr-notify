@@ -43,11 +43,6 @@ import androidx.compose.ui.unit.dp
 import dev.herdrnotify.app.domain.AgentStatus
 import dev.herdrnotify.app.ui.theme.MonoKey
 import dev.herdrnotify.app.ui.theme.Spacing
-import dev.herdrnotify.app.ui.theme.Surface1
-import dev.herdrnotify.app.ui.theme.Surface2
-import dev.herdrnotify.app.ui.theme.TextMuted
-import dev.herdrnotify.app.ui.theme.TextPrimary
-import dev.herdrnotify.app.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 
 /**
@@ -66,7 +61,7 @@ fun HerdrCard(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(Surface1)
+            .background(MaterialTheme.colorScheme.surface)
             .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
             .padding(Spacing.lg),
     ) {
@@ -80,7 +75,7 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text,
         style = MaterialTheme.typography.labelMedium,
-        color = TextSecondary,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = modifier,
     )
 }
@@ -91,7 +86,7 @@ fun Caption(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text,
         style = MaterialTheme.typography.bodySmall,
-        color = TextSecondary,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = modifier,
     )
 }
@@ -127,7 +122,7 @@ fun CommandBlock(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .background(Surface2)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp)),
     ) {
         Row(
@@ -139,7 +134,7 @@ fun CommandBlock(
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
             CopyButton(text = command, label = copyLabel)
@@ -147,7 +142,7 @@ fun CommandBlock(
         Text(
             text = command,
             style = MonoKey,
-            color = TextPrimary,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             softWrap = false,
             modifier = Modifier
@@ -182,7 +177,7 @@ fun CopyButton(text: String, label: String) {
         Icon(
             imageVector = if (copied) Icons.Filled.Check else Icons.Filled.ContentCopy,
             contentDescription = null,
-            tint = if (copied) MaterialTheme.colorScheme.primary else TextMuted,
+            tint = if (copied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -209,13 +204,13 @@ fun ValueRow(
             Text(
                 text = value!!,
                 style = if (mono) MonoKey else MaterialTheme.typography.bodyMedium,
-                color = TextPrimary,
+                color = MaterialTheme.colorScheme.onSurface,
             )
         } else {
             Text(
                 text = placeholder,
                 style = MaterialTheme.typography.bodyMedium,
-                color = TextMuted,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -273,7 +268,7 @@ fun StateBlock(
             modifier = Modifier
                 .size(64.dp)
                 .clip(RoundedCornerShape(18.dp))
-                .background(Surface2),
+                .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,
         ) {
             icon()
@@ -282,12 +277,12 @@ fun StateBlock(
         Text(
             text = title,
             style = MaterialTheme.typography.titleMedium,
-            color = TextPrimary,
+            color = MaterialTheme.colorScheme.onSurface,
         )
         Text(
             text = body,
             style = MaterialTheme.typography.bodyMedium,
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (action != null) {
             Spacer(Modifier.size(Spacing.sm))
