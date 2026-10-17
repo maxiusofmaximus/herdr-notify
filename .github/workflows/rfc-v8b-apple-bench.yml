@@ -106,17 +106,22 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Pick an available iPhone simulator
+        run: |
+          xcrun simctl list devices available | grep -i iphone | head -5
+          UDID=$(xcrun simctl list devices available | grep -i 'iPhone' | head -1 | grep -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}')
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+
       - name: Build for simulator (Release)
         run: |
           xcodebuild -project hello200.xcodeproj -scheme hello200 \
             -configuration Release -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination "platform=iOS Simulator,id=$UDID" \
             -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tail -5
           find build/Build/Products -maxdepth 2 -name 'hello200.app'
 
       - name: Install, launch and measure on simulator
         run: |
-          UDID=$(xcrun simctl list devices available | grep 'iPhone 16 (' | head -1 | grep -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}')
           echo "UDID=$UDID"
           xcrun simctl boot "$UDID" || true
           xcrun simctl bootstatus "$UDID" -b
