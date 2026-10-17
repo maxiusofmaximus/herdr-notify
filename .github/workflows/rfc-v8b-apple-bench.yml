@@ -1,0 +1,166 @@
+# RFC v8b — Apple (macOS + iOS simulator) SwiftUI hello200 benchmark.
+# Triggers: push to branch ci/apple-bench, or manual workflow_dispatch.
+# Paths are relative to the repository root (this file lives in .github/workflows/).
+# Results: uploaded as artifacts and written to the job summary. See ui-hello-200/APPLE-BENCH.md.
+name: rfc-v8b-apple-bench
+
+on:
+  push:
+    branches: [ci/apple-bench]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS SwiftUI (hello200)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: ui-hello-200/swift
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (release)
+        run: swift build -c release
+
+      - name: Cold starts x5 (first frame and RSS)
+        run: |
+          BIN="$(swift build -c release --show-bin-path)/hello200"
+          mkdir -p results
+          : > results/first-frame.txt
+          for i in 1 2 3 4 5; do
+            rm -f first_frame.marker
+            "$BIN" > /dev/null 2> "results/launch-$i.err" &
+            PID=$!
+            for _ in $(seq 1 200); do [ -s first_frame.marker ] && break; sleep 0.05; done
+            echo "run$i: $(cat first_frame.marker 2>/dev/null || echo NO_MARKER)" | tee -a results/first-frame.txt
+            kill $PID 2>/dev/null || true
+            wait $PID 2>/dev/null || true
+          done
+
+      - name: Binary size and idle RSS
+        run: |
+          BIN="$(swift build -c release --show-bin-path)/hello200"
+          du -k "$BIN" | tee results/binary-size.txt
+          "$BIN" > /dev/null 2>&1 &
+          PID=$!
+          sleep 5
+          echo "idle_rss_kb: $(ps -o rss= -p $PID | tr -d ' ')" | tee -a results/binary-size.txt
+          kill $PID 2>/dev/null || true
+          wait $PID 2>/dev/null || true
+
+      - name: Scroll benchmark (10 s over 200 rows)
+        run: |
+          BIN="$(swift build -c release --show-bin-path)/hello200"
+          rm -f frames.json
+          "$BIN" --scroll-benchmark 10 > results/scroll.out 2> results/scroll.err &
+          PID=$!
+          for _ in $(seq 1 90); do kill -0 $PID 2>/dev/null || break; sleep 1; done
+          kill $PID 2>/dev/null || true
+          wait $PID 2>/dev/null || true
+          if [ -f frames.json ]; then cp frames.json results/frames.json; else echo "NO_FRAMES" > results/frames-missing.txt; fi
+          cat results/scroll.out
+
+      - name: Upload macOS results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rfc-v8b-macos-results
+          path: ui-hello-200/swift/results/
+          if-no-files-found: warn
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## macOS SwiftUI hello200 (macos-latest)"
+            echo ""
+            echo "### Cold start (first frame ms, RSS MB at first frame)"
+            echo '```'
+            cat results/first-frame.txt 2>/dev/null || echo "no data"
+            echo '```'
+            echo "### Binary and idle RSS"
+            echo '```'
+            cat results/binary-size.txt 2>/dev/null || echo "no data"
+            echo '```'
+            echo "### Scroll benchmark (frame intervals during programmatic scroll)"
+            echo '```json'
+            cat results/frames.json 2>/dev/null || cat results/scroll.out 2>/dev/null || echo "no data"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  ios:
+    name: iOS simulator SwiftUI (hello200)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: ui-hello-200/swift-ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build for simulator (Release)
+        run: |
+          xcodebuild -project hello200.xcodeproj -scheme hello200 \
+            -configuration Release -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tail -5
+          find build/Build/Products -maxdepth 2 -name 'hello200.app'
+
+      - name: Install, launch and measure on simulator
+        run: |
+          UDID=$(xcrun simctl list devices available | grep 'iPhone 16 (' | head -1 | grep -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}')
+          echo "UDID=$UDID"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          APP=$(find build/Build/Products -maxdepth 2 -name 'hello200.app' | head -1)
+          xcrun simctl install "$UDID" "$APP"
+          BUNDLE=dev.herdrnotify.hello200
+          DOCS="$(xcrun simctl get_app_container "$UDID" $BUNDLE data)/Documents"
+          mkdir -p results
+          : > results/first-frame.txt
+          for i in 1 2 3; do
+            xcrun simctl terminate "$UDID" $BUNDLE 2>/dev/null || true
+            rm -f "$DOCS/first_frame.marker"
+            xcrun simctl launch "$UDID" $BUNDLE > /dev/null
+            sleep 5
+            echo "run$i: $(cat "$DOCS/first_frame.marker" 2>/dev/null || echo NO_MARKER)" | tee -a results/first-frame.txt
+          done
+          xcrun simctl terminate "$UDID" $BUNDLE 2>/dev/null || true
+          rm -f "$DOCS/frames.json"
+          xcrun simctl launch "$UDID" $BUNDLE --scroll-benchmark 10 > /dev/null
+          sleep 20
+          if [ -f "$DOCS/frames.json" ]; then cp "$DOCS/frames.json" results/frames.json; else echo "NO_FRAMES" > results/frames-missing.txt; fi
+          cat results/frames.json 2>/dev/null || true
+
+      - name: Upload iOS results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rfc-v8b-ios-sim-results
+          path: ui-hello-200/swift-ios/results/
+          if-no-files-found: warn
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## iOS simulator SwiftUI hello200 (macos-latest, iPhone 16)"
+            echo "Note: simulator uses the host GPU; numbers are not device numbers."
+            echo ""
+            echo "### Cold start (first frame ms, RSS MB at first frame)"
+            echo '```'
+            cat results/first-frame.txt 2>/dev/null || echo "no data"
+            echo '```'
+            echo "### Scroll benchmark"
+            echo '```json'
+            cat results/frames.json 2>/dev/null || echo "no data"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
